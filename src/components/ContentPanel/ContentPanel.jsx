@@ -1,10 +1,11 @@
-import React, { useMemo, useCallback, useRef, useEffect } from 'react';
+import React, { useMemo, useCallback, useRef, useEffect, useState } from 'react';
 import styles from './ContentPanel.module.css';
 import { useOptimizedNotifications } from '../../hooks/useOptimizedNotifications';
 import { useAppContext } from '../../contexts/AppContext';
 import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt } from 'react-icons/fa';
 import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable, extractChapterNumbersFromRows } from '../../utils/chapterTable';
 import { extractChapterNumbersFromFileName, uniqueNumbersInOrder } from '../../utils/chapterNumber';
+import { buildShareDisplayResults } from '../../utils/shareDisplay';
 import {
     buildShareLink,
     parseShareLink,
@@ -17,7 +18,8 @@ const ContentPanel = () => {
     const { notifySuccess, notifyError } = useOptimizedNotifications();
     const { analysisResults, analysisProgress, clearAnalysisResults, updateAnalysisResult } = useAppContext();
     const importInputRef = useRef(null);
-    const shareImportedRef = useRef(false);
+    const lastShareTokenRef = useRef('');
+    const [shareView, setShareView] = useState(null);
 
     // JSON数组解析函数
     const parseJSONArray = useCallback((str) => {
@@ -35,6 +37,11 @@ const ContentPanel = () => {
         return [str];
     }, []);
 
+    const displayAnalysisResults = useMemo(
+        () => buildShareDisplayResults(analysisResults, shareView),
+        [analysisResults, shareView]
+    );
+
     // 合并所有已完成的分析结果为统一表格
     const combinedTableData = useMemo(() => {
         let allHeaders = [];
@@ -42,7 +49,7 @@ const ContentPanel = () => {
         let expectedChapterNumbers = [];
         
         // 只处理已完成且无错误的文件
-        const completedEntries = Object.entries(analysisResults)
+        const completedEntries = Object.entries(displayAnalysisResults)
             .filter(([, data]) => data.isComplete && !data.hasError && data.content)
             .sort(([fileA, a], [fileB, b]) => {
                 const aNums = Array.isArray(a?.meta?.expectedChapterNumbers) && a.meta.expectedChapterNumbers.length > 0
@@ -83,7 +90,7 @@ const ContentPanel = () => {
             continuity,
             expectedChapterNumbers
         };
-    }, [analysisResults]);
+    }, [displayAnalysisResults]);
 
     // 获取表格数据用于复制和导出
     const getTableContent = useCallback(() => {
@@ -238,28 +245,43 @@ const ContentPanel = () => {
     };
 
     useEffect(() => {
-        if (shareImportedRef.current) return;
-
-        const remoteShareId = parseRemoteShareId(window.location.search);
-
         const loadFromShare = async () => {
+            const remoteShareId = parseRemoteShareId(window.location.search);
+            const hash = window.location.hash || '';
+            const hasHashShare = hash.startsWith('#share=');
+
+            if (!remoteShareId && !hasHashShare) {
+                setShareView(null);
+                lastShareTokenRef.current = '';
+                return;
+            }
+
+            const token = remoteShareId ? `remote:${remoteShareId}` : `hash:${hash}`;
+            const shouldNotify = lastShareTokenRef.current !== token;
             let markdown = null;
+
             if (remoteShareId) {
                 try {
                     markdown = await fetchRemoteShareMarkdown(remoteShareId);
                 } catch (error) {
-                    notifyError('分享链接', `读取远程分享失败: ${error.message}`);
-                    shareImportedRef.current = true;
+                    if (shouldNotify) {
+                        notifyError('分享链接', `读取远程分享失败: ${error.message}`);
+                    }
+                    setShareView(null);
+                    lastShareTokenRef.current = token;
                     return;
                 }
             }
 
             if (!markdown) {
                 try {
-                    markdown = parseShareLink(window.location.hash);
+                    markdown = parseShareLink(hash);
                 } catch (error) {
-                    notifyError('分享链接', error.message);
-                    shareImportedRef.current = true;
+                    if (shouldNotify) {
+                        notifyError('分享链接', error.message);
+                    }
+                    setShareView(null);
+                    lastShareTokenRef.current = token;
                     return;
                 }
             }
@@ -273,38 +295,52 @@ const ContentPanel = () => {
                 }
 
                 const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(rows));
-                clearAnalysisResults();
-                updateAnalysisResult(
-                    remoteShareId ? `远程分享_${remoteShareId}.md` : '分享链接导入.md',
-                    markdown,
-                    true,
-                    false,
-                    {
+                const targetFileName = remoteShareId ? `远程分享_${remoteShareId}.md` : '分享链接导入.md';
+                setShareView({
+                    fileName: targetFileName,
+                    content: markdown,
+                    meta: {
                         expectedChapterNumbers: importedNumbers,
                         importedFromShareLink: true,
                         remoteShareId: remoteShareId || null
-                    }
-                );
+                    },
+                    timestamp: Date.now()
+                });
 
-                shareImportedRef.current = true;
-                notifySuccess('分享链接', '已从链接加载分析结果');
+                lastShareTokenRef.current = token;
+                if (shouldNotify) {
+                    notifySuccess('分享链接', `已加载分享视图 ${targetFileName}，未覆盖本地结果`);
+                }
             } catch (error) {
-                notifyError('分享链接', `加载失败: ${error.message}`);
-                shareImportedRef.current = true;
+                if (shouldNotify) {
+                    notifyError('分享链接', `加载失败: ${error.message}`);
+                }
+                setShareView(null);
+                lastShareTokenRef.current = token;
             }
         };
 
+        const handleUrlChange = () => {
+            loadFromShare();
+        };
+
         loadFromShare();
-    }, [clearAnalysisResults, notifyError, notifySuccess, updateAnalysisResult]);
+        window.addEventListener('popstate', handleUrlChange);
+        window.addEventListener('hashchange', handleUrlChange);
+        return () => {
+            window.removeEventListener('popstate', handleUrlChange);
+            window.removeEventListener('hashchange', handleUrlChange);
+        };
+    }, [notifyError, notifySuccess]);
 
     // 获取简化的进度信息
     const getSimpleProgressInfo = useCallback(() => {
-        if (!analysisProgress.isAnalyzing && Object.keys(analysisResults).length === 0) {
+        if (!analysisProgress.isAnalyzing && Object.keys(displayAnalysisResults).length === 0) {
             return null;
         }
         
-        const totalFiles = Object.keys(analysisResults).length;
-        const completedFiles = Object.values(analysisResults).filter(r => r.isComplete).length;
+        const totalFiles = Object.keys(displayAnalysisResults).length;
+        const completedFiles = Object.values(displayAnalysisResults).filter(r => r.isComplete).length;
         
         if (analysisProgress.isAnalyzing) {
             // 从文件名中提取章节范围信息
@@ -328,7 +364,7 @@ const ContentPanel = () => {
         }
         
         return null;
-    }, [analysisProgress, analysisResults]);
+    }, [analysisProgress, displayAnalysisResults]);
 
     // 渲染表格
     const renderTable = () => {

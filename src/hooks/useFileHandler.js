@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useNotification } from '../contexts/NotificationContext';
 import { useEpubParser } from './useEpubParser';
 import JSZip from 'jszip';
+import { extractChapterNumberFromTitle, uniqueNumbersInOrder } from '../utils/chapterNumber';
 
 /**
  * 自定义Hook，用于处理文件选择、读取、解析和下载等操作。
@@ -228,10 +229,11 @@ export const useFileHandler = () => {
 
                     // 标题行去掉换行与首尾空白
                     const title = rawTitleLine.replace(/\n/g, '').trim();
+                    const chapterNo = extractChapterNumberFromTitle(title);
 
-                    // 过滤无效/过短内容，避免广告或孤立标题
-                    if (nextContent && nextContent.length > 50) {
-                        chapters.push({ title, content: nextContent });
+                    // 仅过滤空内容，短章节也保留，避免章节号断档
+                    if (nextContent) {
+                        chapters.push({ title, content: nextContent, chapterNo });
                     }
                 }
             }
@@ -257,10 +259,21 @@ export const useFileHandler = () => {
             for (let i = 0; i < chapters.length; i += groupSize) {
                 const groupChapters = chapters.slice(i, i + groupSize);
                 const groupContent = groupChapters.map(ch => `${ch.title}\n\n${ch.content}`).join('\n\n');
-                const startChapter = i + 1;
-                const endChapter = Math.min(i + groupSize, chapters.length);
+                const chapterNumbers = uniqueNumbersInOrder(
+                    groupChapters.map((ch) => ch.chapterNo).filter((n) => Number.isInteger(n) && n > 0)
+                );
+                const startChapter = chapterNumbers.length > 0 ? chapterNumbers[0] : i + 1;
+                const endChapter = chapterNumbers.length > 0
+                    ? chapterNumbers[chapterNumbers.length - 1]
+                    : Math.min(i + groupSize, chapters.length);
                 const groupName = `第${startChapter}-${endChapter}章.txt`;
-                groups.push({ name: groupName, content: groupContent.trim() });
+                groups.push({
+                    name: groupName,
+                    content: groupContent.trim(),
+                    chapterNumbers,
+                    chapterStart: startChapter,
+                    chapterEnd: endChapter
+                });
             }
 
             addNotification(`拆分完成，生成 ${groups.length} 个文件组`, 'success');

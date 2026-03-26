@@ -256,7 +256,10 @@ const PreprocessPanel = () => {
             
             const files = groups.map(group => ({
                 name: group.name,
-                content: group.content
+                content: group.content,
+                chapterNumbers: group.chapterNumbers || [],
+                chapterStart: group.chapterStart,
+                chapterEnd: group.chapterEnd
             }));
             
             setSplitState({

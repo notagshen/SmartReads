@@ -3,45 +3,12 @@ import styles from './ContentPanel.module.css';
 import { useOptimizedNotifications } from '../../hooks/useOptimizedNotifications';
 import { useAppContext } from '../../contexts/AppContext';
 import { FaCopy, FaDownload, FaTable, FaSpinner } from 'react-icons/fa';
+import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable } from '../../utils/chapterTable';
+import { extractChapterNumbersFromFileName, uniqueNumbersInOrder } from '../../utils/chapterNumber';
 
 const ContentPanel = () => {
     const { notifySuccess, notifyError } = useOptimizedNotifications();
     const { analysisResults, analysisProgress } = useAppContext();
-
-    // 简化的表格解析函数
-    const parseMarkdownTable = useCallback((content) => {
-        if (!content) return { headers: [], rows: [] };
-        
-        const lines = content.split('\n').filter(line => line.trim());
-        const tableLines = [];
-        let inTable = false;
-        
-        for (const line of lines) {
-            if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-                tableLines.push(line.trim());
-                inTable = true;
-            } else if (inTable && !line.trim().startsWith('|')) {
-                break;
-            }
-        }
-        
-        if (tableLines.length < 2) return { headers: [], rows: [] };
-        
-        const headerLine = tableLines[0];
-        const headers = headerLine.split('|')
-            .slice(1, -1)
-            .map(h => h.trim());
-        
-        const dataLines = tableLines.slice(2);
-        const rows = dataLines.map(line => {
-            const cells = line.split('|')
-                .slice(1, -1)
-                .map(cell => cell.trim());
-            return cells;
-        });
-        
-        return { headers, rows };
-    }, []);
 
     // JSON数组解析函数
     const parseJSONArray = useCallback((str) => {
@@ -63,11 +30,25 @@ const ContentPanel = () => {
     const combinedTableData = useMemo(() => {
         let allHeaders = [];
         let allRows = [];
+        let expectedChapterNumbers = [];
         
         // 只处理已完成且无错误的文件
         const completedEntries = Object.entries(analysisResults)
             .filter(([, data]) => data.isComplete && !data.hasError && data.content)
-            .sort(([, a], [, b]) => (a.timestamp || 0) - (b.timestamp || 0)); // 按时间正序排列
+            .sort(([fileA, a], [fileB, b]) => {
+                const aNums = Array.isArray(a?.meta?.expectedChapterNumbers) && a.meta.expectedChapterNumbers.length > 0
+                    ? a.meta.expectedChapterNumbers
+                    : extractChapterNumbersFromFileName(fileA);
+                const bNums = Array.isArray(b?.meta?.expectedChapterNumbers) && b.meta.expectedChapterNumbers.length > 0
+                    ? b.meta.expectedChapterNumbers
+                    : extractChapterNumbersFromFileName(fileB);
+
+                if (aNums.length > 0 && bNums.length > 0) {
+                    return aNums[0] - bNums[0];
+                }
+
+                return (a.timestamp || 0) - (b.timestamp || 0);
+            });
         
         for (const [fileName, data] of completedEntries) {
             const { headers, rows } = parseMarkdownTable(data.content);
@@ -77,11 +58,23 @@ const ContentPanel = () => {
                     allHeaders = headers;
                 }
                 allRows.push(...rows);
+                const nums = Array.isArray(data?.meta?.expectedChapterNumbers) && data.meta.expectedChapterNumbers.length > 0
+                    ? data.meta.expectedChapterNumbers
+                    : extractChapterNumbersFromFileName(fileName);
+                expectedChapterNumbers.push(...nums);
             }
         }
-        
-        return { headers: allHeaders, rows: allRows };
-    }, [analysisResults, parseMarkdownTable]);
+
+        expectedChapterNumbers = uniqueNumbersInOrder(expectedChapterNumbers);
+        const continuity = validateChapterContinuity(allRows, expectedChapterNumbers);
+
+        return {
+            headers: allHeaders,
+            rows: allRows,
+            continuity,
+            expectedChapterNumbers
+        };
+    }, [analysisResults]);
 
     // 获取表格数据用于复制和导出
     const getTableContent = useCallback(() => {
@@ -92,17 +85,17 @@ const ContentPanel = () => {
         }
         
         // 生成Markdown表格格式
-        const headerRow = '| ' + headers.join(' | ') + ' |';
-        const separatorRow = '| ' + headers.map(() => '---').join(' | ') + ' |';
-        const dataRows = rows.map(row => '| ' + row.join(' | ') + ' |');
-        
-        return [headerRow, separatorRow, ...dataRows].join('\n');
+        return buildMarkdownTable(headers, rows);
     }, [combinedTableData]);
 
     const handleCopy = async () => {
         const content = getTableContent();
         if (!content) {
             notifyError('复制', '没有可复制的表格数据');
+            return;
+        }
+        if (!combinedTableData.continuity?.isValid) {
+            notifyError('复制', '章节存在缺失/重复/错位，请先重新分析不连续分段');
             return;
         }
 
@@ -124,6 +117,10 @@ const ContentPanel = () => {
         const content = getTableContent();
         if (!content) {
             notifyError('导出', '没有可导出的表格数据');
+            return;
+        }
+        if (!combinedTableData.continuity?.isValid) {
+            notifyError('导出', '章节存在缺失/重复/错位，请先重新分析不连续分段');
             return;
         }
 
@@ -242,7 +239,7 @@ const ContentPanel = () => {
                     <button 
                         className={styles.actionButton}
                         onClick={handleCopy}
-                        disabled={combinedTableData.headers.length === 0}
+                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
                         title="复制表格数据"
                     >
                         <FaCopy />
@@ -251,7 +248,7 @@ const ContentPanel = () => {
                     <button 
                         className={styles.actionButton}
                         onClick={handleExport}
-                        disabled={combinedTableData.headers.length === 0}
+                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
                         title="导出表格数据"
                     >
                         <FaDownload />
@@ -273,6 +270,18 @@ const ContentPanel = () => {
                         </div>
                     );
                 })()}
+
+                {!analysisProgress.isAnalyzing && combinedTableData.rows.length > 0 && !combinedTableData.continuity?.isValid && (
+                    <div className={styles.simpleProgress}>
+                        <span>
+                            章节连续性校验未通过：
+                            {combinedTableData.continuity?.missing?.length > 0 ? ` 缺失 ${combinedTableData.continuity.missing.join(', ')}` : ''}
+                            {combinedTableData.continuity?.duplicates?.length > 0 ? ` 重复 ${combinedTableData.continuity.duplicates.join(', ')}` : ''}
+                            {combinedTableData.continuity?.unexpected?.length > 0 ? ` 越界 ${combinedTableData.continuity.unexpected.join(', ')}` : ''}
+                            {combinedTableData.continuity?.orderMismatch ? ' 顺序错位' : ''}
+                        </span>
+                    </div>
+                )}
                 
                 {/* 表格内容 */}
                 {renderTable()}

@@ -7,6 +7,17 @@ import {
     extractCompletionTextFromJson,
     extractStreamChunkText
 } from '../utils/chatApiCompat';
+import {
+    extractChapterNumbersFromFileName,
+    extractChapterNumbersFromText,
+    uniqueNumbersInOrder
+} from '../utils/chapterNumber';
+import {
+    parseMarkdownTable,
+    buildMarkdownTable,
+    applyExpectedChapterNumbers,
+    validateChapterContinuity
+} from '../utils/chapterTable';
 
 /**
  * AI分析Hook
@@ -31,8 +42,52 @@ export const useAnalyzer = () => {
         return `${status} ${msg}`;
     }, []);
 
+    const resolveExpectedChapterNumbers = useCallback((fileName, content, chapterNumbers = []) => {
+        const fromFile = Array.isArray(chapterNumbers) ? chapterNumbers : [];
+        const fromName = extractChapterNumbersFromFileName(fileName);
+        const fromText = extractChapterNumbersFromText(content);
+        return uniqueNumbersInOrder([...fromFile, ...fromName, ...fromText]);
+    }, []);
+
+    const normalizeAndValidateResult = useCallback((rawResult, expectedNumbers = []) => {
+        const { headers, rows } = parseMarkdownTable(rawResult);
+        if (headers.length === 0 || rows.length === 0) {
+            throw new Error('响应中未解析到有效Markdown表格');
+        }
+
+        const normalizedRows = applyExpectedChapterNumbers(rows, expectedNumbers);
+        if (expectedNumbers.length > 0 && !normalizedRows) {
+            throw new Error(`输出行数与预期章节数不一致（预期 ${expectedNumbers.length} 行，实际 ${rows.length} 行）`);
+        }
+
+        const finalRows = normalizedRows || rows;
+        const continuity = validateChapterContinuity(finalRows, expectedNumbers);
+        if (!continuity.isValid) {
+            throw new Error(
+                [
+                    continuity.missing.length > 0 ? `缺失章节: ${continuity.missing.join(',')}` : '',
+                    continuity.duplicates.length > 0 ? `重复章节: ${continuity.duplicates.join(',')}` : '',
+                    continuity.unexpected.length > 0 ? `越界章节: ${continuity.unexpected.join(',')}` : '',
+                    continuity.orderMismatch ? '章节顺序不一致' : ''
+                ]
+                    .filter(Boolean)
+                    .join('；') || '章节连续性校验失败'
+            );
+        }
+
+        const rebuilt = buildMarkdownTable(headers, finalRows);
+        if (!rebuilt) {
+            throw new Error('表格重建失败');
+        }
+        return rebuilt;
+    }, []);
+
     // 分析提示词模板（与Python版本完全一致）
-    const getAnalysisPrompt = useCallback((content) => {
+    const getAnalysisPrompt = useCallback((content, expectedNumbers = []) => {
+        const expectedHint = expectedNumbers.length > 0
+            ? `\n# 硬性约束（必须满足）\n你必须且只分析这些章节号：${expectedNumbers.join(', ')}。\n输出行数必须严格等于 ${expectedNumbers.length} 行，且按上述顺序逐行对应。\n若正文中存在“序章/番外”等无数字章节标题，请不要单独输出为一行。\n`
+            : '';
+
         return `# 角色
 你是一位经验丰富的小说编辑和金牌剧情分析师。你擅长解构故事，洞察每一章节的功能、节奏和情感，并能将其转化为高度结构化的分析报告。
 
@@ -65,6 +120,7 @@ export const useAnalyzer = () => {
 **绝对禁止**在你的回答中包含任何Markdown表格之外的内容。
 你的回答**必须**以 \`| 章节号 |\` 开头，并以表格的最后一行结束。
 不要添加任何介绍、总结、解释或任何其他文字。
+${expectedHint}
 
 以下是小说正文：
 
@@ -72,11 +128,11 @@ ${content}`;
     }, []);
 
     // 调用API进行分析
-    const callAnalysisAPI = useCallback(async (content, onProgress) => {
+    const callAnalysisAPI = useCallback(async (content, onProgress, expectedNumbers = []) => {
         try {
             const requestBody = buildChatCompletionRequestBody({
                 model: settings.model,
-                prompt: getAnalysisPrompt(content),
+                prompt: getAnalysisPrompt(content, expectedNumbers),
                 temperature: settings.temperature,
                 maxTokens: settings.maxTokens,
                 stream: true
@@ -181,8 +237,10 @@ ${content}`;
         }
     }, [settings, getAnalysisPrompt, parseErrorMessage]);
 
-    // 分析单个文件
-    const analyzeSingleFile = useCallback(async (fileName, content, onProgress) => {
+    // 分析单个文件（带章节连续性校验与自动重试）
+    const analyzeSingleFile = useCallback(async (file, onProgress) => {
+        const fileName = file?.name || '未命名文件';
+        const content = file?.content || '';
         try {
             if (!settings.apiKey) {
                 throw new Error('请先在设置中配置API密钥');
@@ -197,6 +255,8 @@ ${content}`;
                 throw new Error('文件内容过短，建议至少100字符以上');
             }
 
+            const expectedNumbers = resolveExpectedChapterNumbers(fileName, content, file?.chapterNumbers);
+
             // 如果内容过长，截取前80%用于分析
             let analysisContent = content;
             if (content.length > settings.maxTokens * 3) { // 粗略估算token数
@@ -208,14 +268,36 @@ ${content}`;
                 }
             }
 
-            // 调用API分析
-            const result = await callAnalysisAPI(analysisContent, onProgress);
+            const maxRetries = 2;
+            let lastError = null;
+            for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+                try {
+                    // 调用API分析
+                    const rawResult = await callAnalysisAPI(analysisContent, onProgress, expectedNumbers);
 
-            if (!result || result.trim().length === 0) {
-                throw new Error('API返回结果为空');
+                    if (!rawResult || rawResult.trim().length === 0) {
+                        throw new Error('API返回结果为空');
+                    }
+
+                    const normalized = normalizeAndValidateResult(rawResult, expectedNumbers);
+                    return {
+                        content: normalized,
+                        meta: {
+                            expectedChapterNumbers: expectedNumbers,
+                            rowCount: expectedNumbers.length
+                        }
+                    };
+                } catch (error) {
+                    lastError = error;
+                    if (attempt < maxRetries && onProgress) {
+                        onProgress({
+                            text: `\n⚠️ 章节连续性校验未通过，正在重试 (${attempt + 1}/${maxRetries})...\n`
+                        });
+                    }
+                }
             }
 
-            return result;
+            throw lastError || new Error('分析结果校验失败');
 
         } catch (error) {
             const errorMessage = `分析文件 ${fileName} 失败: ${error.message}`;
@@ -224,7 +306,7 @@ ${content}`;
             }
             throw new Error(errorMessage);
         }
-    }, [settings, callAnalysisAPI]);
+    }, [settings, callAnalysisAPI, normalizeAndValidateResult, resolveExpectedChapterNumbers]);
 
     // 批量分析文件
     const analyzeMultipleFiles = useCallback(async (files, onProgress, onFileComplete) => {
@@ -271,17 +353,20 @@ ${content}`;
                     };
 
                     // 分析单个文件
-                    const result = await analyzeSingleFile(fileName, file.content, fileProgressCallback);
+                    const analyzed = await analyzeSingleFile(file, fileProgressCallback);
+                    const result = analyzed.content;
+                    const meta = analyzed.meta;
                     
                     results[fileName] = {
                         success: true,
                         result,
+                        meta,
                         timestamp: Date.now()
                     };
 
                     // 文件完成回调
                     if (onFileComplete) {
-                        onFileComplete(fileName, result, i + 1, totalFiles);
+                        onFileComplete(fileName, result, i + 1, totalFiles, null, meta);
                     }
 
                     // 文件间添加延迟，避免API限制
@@ -297,7 +382,7 @@ ${content}`;
                     };
 
                     if (onFileComplete) {
-                        onFileComplete(fileName, null, i + 1, totalFiles, error.message);
+                        onFileComplete(fileName, null, i + 1, totalFiles, error.message, null);
                     }
                 }
             }

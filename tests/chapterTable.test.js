@@ -52,3 +52,18 @@ test('buildMarkdownTable rebuilds markdown output', () => {
   const md = buildMarkdownTable(['A', 'B'], [['1', 'x']]);
   assert.equal(md, '| A | B |\n| --- | --- |\n| 1 | x |');
 });
+
+test('buildMarkdownTable should encode multiline cell safely', () => {
+  const md = buildMarkdownTable(['A', 'B'], [['1', 'line1\nline2']]);
+  assert.equal(md, '| A | B |\n| --- | --- |\n| 1 | line1<br/>line2 |');
+});
+
+test('parseMarkdownTable should decode <br/> back to newline', () => {
+  const text = `
+| 章节号 | 章节标题 |
+| --- | --- |
+| 1 | 第一行<br/>第二行 |
+`;
+  const { rows } = parseMarkdownTable(text);
+  assert.equal(rows[0][1], '第一行\n第二行');
+});

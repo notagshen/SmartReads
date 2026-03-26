@@ -20,6 +20,7 @@ const ContentPanel = () => {
     const importInputRef = useRef(null);
     const lastShareTokenRef = useRef('');
     const [shareView, setShareView] = useState(null);
+    const isShareOnlyView = Boolean(shareView);
 
     // JSON数组解析函数
     const parseJSONArray = useCallback((str) => {
@@ -427,21 +428,25 @@ const ContentPanel = () => {
                     分析结果
                 </h2>
                 <div className={styles.panelActions}>
-                    <input
-                        ref={importInputRef}
-                        type="file"
-                        accept=".md,.markdown,.txt,text/markdown,text/plain"
-                        onChange={handleImportFile}
-                        className={styles.hiddenInput}
-                    />
-                    <button
-                        className={styles.actionButton}
-                        onClick={handleImportClick}
-                        title="导入Markdown表格"
-                    >
-                        <FaUpload />
-                        导入
-                    </button>
+                    {!isShareOnlyView && (
+                        <>
+                            <input
+                                ref={importInputRef}
+                                type="file"
+                                accept=".md,.markdown,.txt,text/markdown,text/plain"
+                                onChange={handleImportFile}
+                                className={styles.hiddenInput}
+                            />
+                            <button
+                                className={styles.actionButton}
+                                onClick={handleImportClick}
+                                title="导入Markdown表格"
+                            >
+                                <FaUpload />
+                                导入
+                            </button>
+                        </>
+                    )}
                     <button 
                         className={styles.actionButton}
                         onClick={handleCopy}
@@ -451,15 +456,17 @@ const ContentPanel = () => {
                         <FaCopy />
                         复制
                     </button>
-                    <button
-                        className={styles.actionButton}
-                        onClick={handleShare}
-                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
-                        title="分享表格数据"
-                    >
-                        <FaShareAlt />
-                        分享
-                    </button>
+                    {!isShareOnlyView && (
+                        <button
+                            className={styles.actionButton}
+                            onClick={handleShare}
+                            disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
+                            title="分享表格数据"
+                        >
+                            <FaShareAlt />
+                            分享
+                        </button>
+                    )}
                     <button 
                         className={styles.actionButton}
                         onClick={handleExport}

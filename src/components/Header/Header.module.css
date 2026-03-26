@@ -63,6 +63,14 @@
     transform: scale(1.05);
 }
 
+.logoButton {
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
 .headerActions {
     display: flex;
     gap: var(--spacing-sm);

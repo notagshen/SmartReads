@@ -153,8 +153,10 @@ const AnalysisPanel = () => {
         try {
             setIsStopping(false);
 
-            // 检查已完成快照，已完成文件直接复用，未完成文件续跑
-            const { cachedResults, filesToAnalyze } = partitionQueueByResults(analysisQueue, analysisResults);
+            // 仅在“刷新后续跑”场景复用快照；普通手动开始不复用旧结果
+            const reuseSnapshot = shouldResumeAnalysis;
+            const sourceResults = reuseSnapshot ? analysisResults : {};
+            const { cachedResults, filesToAnalyze } = partitionQueueByResults(analysisQueue, sourceResults);
 
             // 每次开始分析先清理旧结果，避免历史批次混入导致章节重复/错位
             clearAnalysisResults();
@@ -163,7 +165,7 @@ const AnalysisPanel = () => {
             startAnalysis(analysisQueue.length);
             
             // 先显示缓存结果
-            if (Object.keys(cachedResults).length > 0) {
+            if (reuseSnapshot && Object.keys(cachedResults).length > 0) {
                 const queueFileByName = new Map(analysisQueue.map((item) => [item.name, item]));
                 Object.entries(cachedResults).forEach(([fileName, content]) => {
                     const file = queueFileByName.get(fileName);
@@ -174,7 +176,7 @@ const AnalysisPanel = () => {
             }
 
             // 如果所有文件都有缓存，直接完成
-            if (filesToAnalyze.length === 0) {
+            if (reuseSnapshot && filesToAnalyze.length === 0) {
                 completeAnalysis();
                 notifySuccess('分析完成', '所有结果均来自页面缓存');
                 return;
@@ -236,6 +238,7 @@ const AnalysisPanel = () => {
     }, [
         analysisQueue,
         analysisResults,
+        shouldResumeAnalysis,
         clearAnalysisResults,
         startAnalysis,
         completeAnalysis,

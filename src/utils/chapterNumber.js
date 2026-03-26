@@ -142,3 +142,21 @@ export const uniqueNumbersInOrder = (numbers = []) => {
 
     return out;
 };
+
+export const resolveExpectedChapterNumbers = ({
+    fileName = '',
+    content = '',
+    chapterNumbers = []
+} = {}) => {
+    const fromFile = uniqueNumbersInOrder(Array.isArray(chapterNumbers) ? chapterNumbers : []);
+    if (fromFile.length > 0) {
+        return fromFile;
+    }
+
+    const fromName = uniqueNumbersInOrder(extractChapterNumbersFromFileName(fileName));
+    if (fromName.length > 0) {
+        return fromName;
+    }
+
+    return uniqueNumbersInOrder(extractChapterNumbersFromText(content));
+};

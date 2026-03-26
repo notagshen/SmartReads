@@ -218,7 +218,17 @@ const ContentPanel = () => {
                 notifySuccess('分享', '已调用系统分享');
                 return;
             }
-            await navigator.clipboard.writeText(shareUrl);
+
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(shareUrl);
+            } else {
+                const textArea = document.createElement('textarea');
+                textArea.value = shareUrl;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
             notifySuccess('分享', '分享链接已复制到剪贴板');
         } catch (error) {
             if (error?.name !== 'AbortError') {

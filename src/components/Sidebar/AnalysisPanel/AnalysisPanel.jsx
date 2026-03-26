@@ -156,6 +156,9 @@ const AnalysisPanel = () => {
             // 检查已完成快照，已完成文件直接复用，未完成文件续跑
             const { cachedResults, filesToAnalyze } = partitionQueueByResults(analysisQueue, analysisResults);
 
+            // 每次开始分析先清理旧结果，避免历史批次混入导致章节重复/错位
+            clearAnalysisResults();
+
             // 开始分析流程
             startAnalysis(analysisQueue.length);
             
@@ -233,6 +236,7 @@ const AnalysisPanel = () => {
     }, [
         analysisQueue,
         analysisResults,
+        clearAnalysisResults,
         startAnalysis,
         completeAnalysis,
         updateAnalysisProgress,

@@ -207,7 +207,7 @@ export const useFileHandler = () => {
     }, [addNotification, parseEpubForAnalysis]);
 
     // 按“章节标题行”进行精准拆分，并按组大小聚合
-    const splitTextToChapters = useCallback(async (text, groupSize = 50) => {
+    const splitTextToChapters = useCallback(async (text, groupSize = 5) => {
         try {
             setIsProcessing(true);
             if (!text || text.trim().length === 0) {

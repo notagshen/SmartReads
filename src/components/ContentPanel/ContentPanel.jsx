@@ -1,14 +1,17 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useRef, useEffect } from 'react';
 import styles from './ContentPanel.module.css';
 import { useOptimizedNotifications } from '../../hooks/useOptimizedNotifications';
 import { useAppContext } from '../../contexts/AppContext';
-import { FaCopy, FaDownload, FaTable, FaSpinner } from 'react-icons/fa';
-import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable } from '../../utils/chapterTable';
+import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt } from 'react-icons/fa';
+import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable, extractChapterNumbersFromRows } from '../../utils/chapterTable';
 import { extractChapterNumbersFromFileName, uniqueNumbersInOrder } from '../../utils/chapterNumber';
+import { buildShareLink, parseShareLink } from '../../utils/shareLink';
 
 const ContentPanel = () => {
     const { notifySuccess, notifyError } = useOptimizedNotifications();
-    const { analysisResults, analysisProgress } = useAppContext();
+    const { analysisResults, analysisProgress, clearAnalysisResults, updateAnalysisResult } = useAppContext();
+    const importInputRef = useRef(null);
+    const shareImportedRef = useRef(false);
 
     // JSON数组解析函数
     const parseJSONArray = useCallback((str) => {
@@ -142,6 +145,115 @@ const ContentPanel = () => {
         }
     };
 
+    const handleImportClick = () => {
+        importInputRef.current?.click();
+    };
+
+    const handleImportFile = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+            const { headers, rows } = parseMarkdownTable(text);
+            if (headers.length === 0 || rows.length === 0) {
+                throw new Error('文件中未检测到有效的 Markdown 表格');
+            }
+
+            const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(rows));
+            clearAnalysisResults();
+            updateAnalysisResult(
+                file.name || `导入结果_${Date.now()}.md`,
+                text,
+                true,
+                false,
+                { expectedChapterNumbers: importedNumbers, imported: true }
+            );
+
+            notifySuccess('导入', `已导入 ${file.name}（${rows.length} 行）`);
+        } catch (error) {
+            notifyError('导入', `导入失败: ${error.message}`);
+        } finally {
+            event.target.value = '';
+        }
+    };
+
+    const handleShare = async () => {
+        const content = getTableContent();
+        if (!content) {
+            notifyError('分享', '没有可分享的表格数据');
+            return;
+        }
+        if (!combinedTableData.continuity?.isValid) {
+            notifyError('分享', '章节存在缺失/重复/错位，请先修复后再分享');
+            return;
+        }
+
+        let shareUrl = '';
+        try {
+            shareUrl = buildShareLink(content, window.location.href);
+        } catch (error) {
+            notifyError('分享', error.message);
+            return;
+        }
+
+        try {
+            if (navigator.share) {
+                await navigator.share({
+                    title: 'SmartReads 分析结果',
+                    text: '打开这个链接查看我的分析结果',
+                    url: shareUrl
+                });
+                notifySuccess('分享', '已调用系统分享');
+                return;
+            }
+            await navigator.clipboard.writeText(shareUrl);
+            notifySuccess('分享', '分享链接已复制到剪贴板');
+        } catch (error) {
+            if (error?.name !== 'AbortError') {
+                notifyError('分享', `分享失败: ${error.message || '未知错误'}`);
+            }
+        }
+    };
+
+    useEffect(() => {
+        if (shareImportedRef.current) return;
+
+        let markdown = null;
+        try {
+            markdown = parseShareLink(window.location.hash);
+        } catch (error) {
+            notifyError('分享链接', error.message);
+            shareImportedRef.current = true;
+            return;
+        }
+
+        if (!markdown) return;
+
+        try {
+            const { headers, rows } = parseMarkdownTable(markdown);
+            if (headers.length === 0 || rows.length === 0) {
+                throw new Error('分享链接内容不包含有效表格');
+            }
+
+            const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(rows));
+            clearAnalysisResults();
+            updateAnalysisResult(
+                '分享链接导入.md',
+                markdown,
+                true,
+                false,
+                { expectedChapterNumbers: importedNumbers, importedFromShareLink: true }
+            );
+
+            shareImportedRef.current = true;
+            notifySuccess('分享链接', '已从链接加载分析结果');
+        } catch (error) {
+            notifyError('分享链接', `加载失败: ${error.message}`);
+            shareImportedRef.current = true;
+        }
+    }, [clearAnalysisResults, notifyError, notifySuccess, updateAnalysisResult]);
+
     // 获取简化的进度信息
     const getSimpleProgressInfo = useCallback(() => {
         if (!analysisProgress.isAnalyzing && Object.keys(analysisResults).length === 0) {
@@ -236,6 +348,21 @@ const ContentPanel = () => {
                     分析结果
                 </h2>
                 <div className={styles.panelActions}>
+                    <input
+                        ref={importInputRef}
+                        type="file"
+                        accept=".md,.markdown,.txt,text/markdown,text/plain"
+                        onChange={handleImportFile}
+                        className={styles.hiddenInput}
+                    />
+                    <button
+                        className={styles.actionButton}
+                        onClick={handleImportClick}
+                        title="导入Markdown表格"
+                    >
+                        <FaUpload />
+                        导入
+                    </button>
                     <button 
                         className={styles.actionButton}
                         onClick={handleCopy}
@@ -244,6 +371,15 @@ const ContentPanel = () => {
                     >
                         <FaCopy />
                         复制
+                    </button>
+                    <button
+                        className={styles.actionButton}
+                        onClick={handleShare}
+                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
+                        title="分享表格数据"
+                    >
+                        <FaShareAlt />
+                        分享
                     </button>
                     <button 
                         className={styles.actionButton}

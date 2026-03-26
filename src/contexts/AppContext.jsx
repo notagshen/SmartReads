@@ -25,7 +25,8 @@ export const AppProvider = ({ children }) => {
         baseUrl: DEFAULT_UPSTREAM_BASE_URL,
         model: 'gpt-3.5-turbo',
         temperature: 0.7,
-        maxTokens: 4000
+        maxTokens: 4000,
+        truncationThresholdChars: 120000
     });
 
     // API连接状态管理

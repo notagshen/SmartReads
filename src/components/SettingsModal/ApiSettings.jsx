@@ -3,6 +3,11 @@ import styles from './ApiSettings.module.css';
 import { useAppContext } from '../../contexts/AppContext';
 import { useAnalyzer } from '../../hooks/useAnalyzer';
 import { useOptimizedNotifications } from '../../hooks/useOptimizedNotifications';
+import {
+    sanitizeMaxTokens,
+    sanitizeTemperature,
+    sanitizeTruncationThreshold
+} from '../../utils/settingsValidation';
 
 const ApiSettings = () => {
     const { settings, updateSettings, clearClientCache, setApiConnectionStatus } = useAppContext();
@@ -14,11 +19,11 @@ const ApiSettings = () => {
     const handleChange = (field, value) => {
         let processedValue = value;
         if (field === 'temperature') {
-            processedValue = parseFloat(value);
-            if (isNaN(processedValue)) processedValue = 0.7;
+            processedValue = sanitizeTemperature(value, 0.7);
         } else if (field === 'maxTokens') {
-            processedValue = parseInt(value);
-            if (isNaN(processedValue)) processedValue = 4000;
+            processedValue = sanitizeMaxTokens(value, 4000);
+        } else if (field === 'truncationThresholdChars') {
+            processedValue = sanitizeTruncationThreshold(value, 120000);
         }
         updateSettings({ [field]: processedValue });
     };
@@ -139,13 +144,26 @@ const ApiSettings = () => {
                         type="number"
                         className={styles.formInput}
                         placeholder="输入最大令牌数"
-                        min="100"
-                        max="32000"
                         value={settings.maxTokens ?? 4000}
                         onChange={(e) => handleChange('maxTokens', e.target.value)}
                     />
                     <div className={styles.formHelp}>
                         <small>建议范围：1000-16000，根据模型选择合适的值</small>
+                    </div>
+                </div>
+
+                <div className={styles.formGroup}>
+                    <label htmlFor="truncationThresholdChars">章节均衡截断阈值(字符):</label>
+                    <input
+                        id="truncationThresholdChars"
+                        type="number"
+                        className={styles.formInput}
+                        placeholder="超过该长度才截断"
+                        value={settings.truncationThresholdChars ?? 120000}
+                        onChange={(e) => handleChange('truncationThresholdChars', e.target.value)}
+                    />
+                    <div className={styles.formHelp}>
+                        <small>默认120000；仅当正文长度超过阈值时才触发章节均衡截断</small>
                     </div>
                 </div>
 

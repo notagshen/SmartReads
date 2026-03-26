@@ -99,6 +99,17 @@ const getShareById = async (pool, id) => {
   return result.rows[0];
 };
 
+const updateShareById = async (pool, id, markdown) => {
+  const result = await pool.query(
+    `UPDATE shared_analyses
+     SET markdown = $2
+     WHERE id = $1
+     RETURNING id`,
+    [id, markdown]
+  );
+  return result.rowCount === 1;
+};
+
 const increaseShareViewCount = (pool, id) => {
   pool.query(
     'UPDATE shared_analyses SET view_count = view_count + 1 WHERE id = $1',
@@ -168,6 +179,38 @@ const handleShareApiRequest = async (req, res, parsed) => {
       return true;
     } catch (error) {
       writeJson(res, 500, { error: { message: `读取分享内容失败: ${error.message}` } });
+      return true;
+    }
+  }
+
+  if (method === 'PUT' && pathname.startsWith(`${SHARE_PREFIX}/`)) {
+    const id = decodeURIComponent(pathname.slice(`${SHARE_PREFIX}/`.length));
+    if (!SHARE_ID_PATTERN.test(id)) {
+      writeJson(res, 400, { error: { message: '分享ID格式无效' } });
+      return true;
+    }
+
+    try {
+      const body = await parseJsonBody(req);
+      const markdown = typeof body.markdown === 'string' ? body.markdown.trim() : '';
+      if (!markdown) {
+        writeJson(res, 400, { error: { message: '缺少 markdown 内容' } });
+        return true;
+      }
+      if (Buffer.byteLength(markdown, 'utf8') > MAX_SHARE_MARKDOWN_SIZE) {
+        writeJson(res, 413, { error: { message: '分享内容过大，请改用文件导出' } });
+        return true;
+      }
+
+      const updated = await updateShareById(pool, id, markdown);
+      if (!updated) {
+        writeJson(res, 404, { error: { message: '分享内容不存在或已失效' } });
+        return true;
+      }
+      writeJson(res, 200, { id, updated: true });
+      return true;
+    } catch (error) {
+      writeJson(res, 400, { error: { message: error.message } });
       return true;
     }
   }

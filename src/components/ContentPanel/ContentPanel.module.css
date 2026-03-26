@@ -312,6 +312,26 @@
     border-right: none;
 }
 
+.editCellInput {
+    width: 100%;
+    min-height: 88px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-primary);
+    padding: 8px 10px;
+    resize: vertical;
+    line-height: 1.4;
+    font-size: 0.8rem;
+    font-family: inherit;
+}
+
+.editCellInput:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(110, 68, 255, 0.18);
+}
+
 /* 优化列宽设置，确保文字能够正确换行显示 */
 .analysisTable th:nth-child(1), /* 章节号 */
 .analysisTable td:nth-child(1) {

@@ -8,9 +8,7 @@ import {
     extractStreamChunkText
 } from '../utils/chatApiCompat';
 import {
-    extractChapterNumbersFromFileName,
-    extractChapterNumbersFromText,
-    uniqueNumbersInOrder
+    resolveExpectedChapterNumbers
 } from '../utils/chapterNumber';
 import {
     parseMarkdownTable,
@@ -45,13 +43,6 @@ export const useAnalyzer = () => {
 
         const msg = payload.error?.message || payload.message || fallbackStatusText;
         return `${status} ${msg}`;
-    }, []);
-
-    const resolveExpectedChapterNumbers = useCallback((fileName, content, chapterNumbers = []) => {
-        const fromFile = Array.isArray(chapterNumbers) ? chapterNumbers : [];
-        const fromName = extractChapterNumbersFromFileName(fileName);
-        const fromText = extractChapterNumbersFromText(content);
-        return uniqueNumbersInOrder([...fromFile, ...fromName, ...fromText]);
     }, []);
 
     const normalizeAndValidateResult = useCallback((rawResult, expectedNumbers = []) => {
@@ -290,7 +281,11 @@ ${content}`;
                 throw new Error('文件内容过短，建议至少100字符以上');
             }
 
-            const expectedNumbers = resolveExpectedChapterNumbers(fileName, content, file?.chapterNumbers);
+            const expectedNumbers = resolveExpectedChapterNumbers({
+                fileName,
+                content,
+                chapterNumbers: file?.chapterNumbers
+            });
 
             // 默认不截断，仅在超阈值时进行章节均衡截断
             let analysisContent = content;
@@ -343,7 +338,7 @@ ${content}`;
             }
             throw new Error(errorMessage);
         }
-    }, [settings, callAnalysisAPI, normalizeAndValidateResult, resolveExpectedChapterNumbers, buildChapterBalancedExcerpt]);
+    }, [settings, callAnalysisAPI, normalizeAndValidateResult, buildChapterBalancedExcerpt]);
 
     // 批量分析文件
     const analyzeMultipleFiles = useCallback(async (files, onProgress, onFileComplete) => {

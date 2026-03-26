@@ -8,7 +8,12 @@ const splitRow = (line) =>
         .trim()
         .split('|')
         .slice(1, -1)
-        .map((cell) => cell.trim());
+        .map((cell) => cell.trim().replace(/<br\s*\/?>/gi, '\n'));
+
+const sanitizeCellForMarkdown = (cell) =>
+    String(cell ?? '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/\n/g, '<br/>');
 
 export const parseMarkdownTable = (content = '') => {
     const lines = String(content)
@@ -47,9 +52,9 @@ export const buildMarkdownTable = (headers = [], rows = []) => {
         return '';
     }
 
-    const headerLine = `| ${headers.join(' | ')} |`;
+    const headerLine = `| ${headers.map(sanitizeCellForMarkdown).join(' | ')} |`;
     const sepLine = `| ${headers.map(() => '---').join(' | ')} |`;
-    const rowLines = rows.map((row) => `| ${row.join(' | ')} |`);
+    const rowLines = rows.map((row) => `| ${row.map(sanitizeCellForMarkdown).join(' | ')} |`);
 
     return [headerLine, sepLine, ...rowLines].join('\n');
 };

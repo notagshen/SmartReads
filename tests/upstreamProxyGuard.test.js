@@ -10,10 +10,10 @@ test('normalizeUpstreamBaseUrl trims trailing slash', () => {
   assert.equal(normalizeUpstreamBaseUrl(' https://example.com/v1/ '), 'https://example.com/v1');
 });
 
-test('ensureSafeUpstreamBaseUrl blocks localhost and private IPv4', () => {
-  assert.throws(() => ensureSafeUpstreamBaseUrl('http://localhost:3000'));
-  assert.throws(() => ensureSafeUpstreamBaseUrl('http://127.0.0.1:3000'));
-  assert.throws(() => ensureSafeUpstreamBaseUrl('http://192.168.1.20:3000'));
+test('ensureSafeUpstreamBaseUrl allows localhost and private IPv4', () => {
+  assert.equal(ensureSafeUpstreamBaseUrl('http://localhost:3000'), 'http://localhost:3000');
+  assert.equal(ensureSafeUpstreamBaseUrl('http://127.0.0.1:3000'), 'http://127.0.0.1:3000');
+  assert.equal(ensureSafeUpstreamBaseUrl('http://192.168.1.20:3000'), 'http://192.168.1.20:3000');
 });
 
 test('ensureSafeUpstreamBaseUrl allows public https URL', () => {

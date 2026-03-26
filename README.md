@@ -19,6 +19,33 @@
 ### 🌙 主界面 - 深色主题  
 ![主界面深色主题](images/screenshot-dark.png)
 
+## 🆕 更新（改动重点）
+
+- 跨域（CORS）问题已解决：
+  - 前端统一通过同源 `/api/proxy` 调用上游接口，不再由浏览器直接跨域访问上游。
+  - 支持每位用户独立配置 `baseUrl`，由后端按请求头动态转发。
+
+- 拆分与上下文策略调整：
+  - 章节分组新增 `5章/组`，并改为默认 `5章/组`。
+  - `maxTokens` 输入框取消前端上限限制。
+  - 分析改为“默认不截断”，仅在超阈值时进行章节均衡截断。
+  - 新增“章节均衡截断阈值(字符)”可配置项（默认 `120000`）。
+
+- 分享与导入体验升级：
+  - 支持链接分享（远程 Neon 存储 + 本地压缩链接回退）。
+  - 分享链接进入后为“分享视图”：只展示分享内容，不覆盖本地结果；离开分享链接后恢复本地内容。
+
+- 顶部导航行为：
+  - 点击 Header 中的 `SmartReads` 可回到主机域名首页（`window.location.origin`）。
+
+- CI / 部署补充：
+  - 新增 GitHub Actions：`.github/workflows/docker-arm64.yml`，在仓库变更时自动构建 ARM64 镜像并推送 GHCR（默认分支推送）。
+
+- 章节连续性增强：
+  - 分析结果增加章节连续性校验与自动重试。
+  - 修复章节号推断逻辑：优先使用 `chapterNumbers`，其次文件名范围，最后才回退正文扫描，避免误把正文中的 `第1章/第3章` 混入期望章节。
+  - 手动点击“开始分析”时会先清理旧结果，防止历史批次混入导致重复章号和顺序错位（仅“刷新后续跑”场景复用快照）。
+
 ## ✨ 主要特性
 
 ### 📚 智能章节管理
@@ -63,7 +90,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/Ggbond626/SmartReads.git
+git clone https://github.com/notagshen/SmartReads.git
 cd SmartReads
 
 # 安装依赖
@@ -76,17 +103,37 @@ npm run dev
 ### Docker 部署
 
 ```bash
-# 使用 Docker Compose（推荐）
-docker-compose up --build
+# 拉取 ARM64 镜像
+docker pull ghcr.io/notagshen/smartreads:arm64-latest
 
-# 或使用 Docker
-docker build -t smartreads-web .
+# 使用 Docker Compose（推荐）
+docker-compose up -d
+
+# 或直接使用 Docker
 docker run -p 4173:4173 \
+  --name smartreads-web \
+  -e NODE_ENV=production \
   -e NEON_DATABASE_URL="postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require" \
-  smartreads-web
+  ghcr.io/notagshen/smartreads:arm64-latest
 ```
 
 访问 http://localhost:4173 开始使用
+
+#### 动态服务端代理（每用户独立上游）
+
+项目内置同源代理路径 `/api/proxy`。前端会把用户在页面填写的上游 `baseUrl` 通过请求头传给本项目后端，再由后端转发到对应上游。
+
+- 每个用户可填写自己的上游 `baseUrl`
+- 后端会校验上游 URL 格式与协议（`http/https`），支持本地/私网地址（如 `http://localhost:3000`）
+- 可选配置 `NEON_DATABASE_URL`（或 `DATABASE_URL`）开启链接分享存储接口：`POST /api/share`、`GET /api/share/:id`
+
+#### Docker/服务端环境变量参数表
+
+| 参数 | 说明 | 是否必选 | 默认值 | 示例 |
+| --- | --- | --- | --- | --- |
+| `NODE_ENV` | Node 运行环境标识（容器中通常设为生产模式） | 否 | `development`（未设置时） | `production` |
+| `NEON_DATABASE_URL` | 分享链接存储数据库连接串（优先使用） | 否 | 无 | `postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require` |
+| `DATABASE_URL` | 备用数据库连接串（当未设置 `NEON_DATABASE_URL` 时使用） | 否 | 无 | `postgres://user:pass@host:5432/db` |
 
 ## 📖 使用指南
 
@@ -94,18 +141,22 @@ docker run -p 4173:4173 \
 1. 点击右上角设置按钮 ⚙️
 2. 在"API设置"中配置：
    - API密钥
-   - 基础URL（填写你自己的上游地址，如 `https://axonhub.052222.xyz/v1`）
+   - 基础URL（填写你自己的上游地址，如 `https://api.openai.com/v1`）
    - 模型选择
    - 参数调整
 3. 测试连接确保配置正确
 
-### 动态服务端代理（每用户独立上游）
+#### API设置参数表
 
-项目内置同源代理路径 `/api/proxy`。前端会把用户填写的上游URL通过请求头传给本项目后端，再由后端转发到对应上游。
-
-- 每个用户可以填写自己的上游 `baseUrl`
-- 后端会做基础安全检查：禁止 `localhost`、私网IP 等危险上游地址
-- 可选配置 `NEON_DATABASE_URL`（或 `DATABASE_URL`）开启链接分享存储接口：`POST /api/share`、`GET /api/share/:id`
+| 参数 | 说明 | 是否必选 | 默认值 | 示例 |
+| --- | --- | --- | --- | --- |
+| `apiKey` | 上游模型服务的访问密钥 | 是 | 无 | `sk-xxxx` |
+| `baseUrl` | 上游 API 基础地址（由本项目后端同源中转） | 否 | `https://api.openai.com/v1` | `https://api.openai.com/v1` |
+| `model` | 调用的模型名称 | 否 | `gpt-3.5-turbo` | `gemini-2.5-pro` / `gpt-5` |
+| `temperature` | 采样温度，越低越稳定、越高越发散 | 否 | `0.7` | `0.2` / `0.9` |
+| `maxTokens` | 单次生成最大 token 数（前端不再限制上限） | 否 | `4000` | `8000` / `32000` |
+| `truncationThresholdChars` | 章节均衡截断触发阈值（字符）；正文超过该值才截断 | 否 | `120000` | `150000` |
+> 服务端代理与环境变量配置请见上方 **Docker 部署** 章节。
 
 ### 2. 上传小说文件
 1. 在"预处理"面板选择文件
@@ -164,6 +215,7 @@ src/
 - ✅ **移动适配**: 响应式设计
 - ✅ **缓存机制**: 提升处理效率
 - ✅ **错误处理**: 友好的错误提示
+
 
 ## ⚠️ 注意事项
 

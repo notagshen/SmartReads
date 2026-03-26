@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   smartreads-web:
-    build: .
+    image: ghcr.io/notagshen/smartreads:arm64-latest
     ports:
       - "9220:4173"
     environment:

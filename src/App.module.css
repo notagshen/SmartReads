@@ -18,6 +18,51 @@
   overflow: hidden;
 }
 
+.sidebarSlot {
+  flex: 0 0 420px;
+  width: 420px;
+  min-width: 0;
+  overflow: hidden;
+  transition:
+    flex-basis 0.36s ease,
+    width 0.36s ease,
+    opacity 0.26s ease,
+    transform 0.36s ease,
+    margin 0.36s ease;
+}
+
+.contentSlot {
+  flex: 1 1 auto;
+  min-width: 0;
+  transition:
+    flex-basis 0.36s ease,
+    width 0.36s ease,
+    margin 0.36s ease;
+}
+
+.shareMode {
+  gap: 0;
+}
+
+.shareMode .sidebarSlot {
+  flex-basis: 0;
+  width: 0;
+  opacity: 0;
+  transform: translateX(-18px);
+  margin-right: 0;
+  pointer-events: none;
+}
+
+.shareMode .contentSlot {
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.shareNoAnimate .sidebarSlot,
+.shareNoAnimate .contentSlot {
+  transition: none !important;
+}
+
 /* 移动端布局优化 */
 @media (max-width: 768px) {
   .mainContainer {
@@ -26,6 +71,17 @@
     padding: var(--spacing-sm);
     overflow-y: auto;
     overflow-x: hidden;
+  }
+
+  .sidebarSlot {
+    flex-basis: auto;
+    width: 100%;
+  }
+
+  .shareMode .sidebarSlot {
+    flex-basis: 0;
+    width: 0;
+    max-height: 0;
   }
 }
 

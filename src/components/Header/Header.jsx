@@ -12,13 +12,22 @@ const Header = () => {
         toggleTheme();
     };
 
+    const handleLogoClick = () => {
+        window.location.assign(window.location.origin);
+    };
+
     return (
         <header className={`${styles.header} animate-slide-down`}>
             <div className={styles.headerContent}>
-                <div className={styles.logo}>
+                <button
+                    type="button"
+                    className={`${styles.logo} ${styles.logoButton}`}
+                    onClick={handleLogoClick}
+                    title="返回主域名首页"
+                >
                     <i className="fas fa-book-open"></i>
                     <span>SmartReads</span>
-                </div>
+                </button>
                 <div className={styles.headerActions}>
                     <button 
                         className={`${styles.btnIcon} ${styles.themeToggle}`} 

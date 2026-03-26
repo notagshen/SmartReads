@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import styles from './AnalysisPanel.module.css';
 import FileInput from '../../common/FileInput/FileInput';
 import FileList from './FileList/FileList';
@@ -10,6 +10,7 @@ import { useOptimizedNotifications } from '../../../hooks/useOptimizedNotificati
 import { useAnalyzer } from '../../../hooks/useAnalyzer';
 import { useCache } from '../../../contexts/CacheContext';
 import { useFileHandler } from '../../../hooks/useFileHandler';
+import { partitionQueueByResults, shouldAutoResume, createResumeLogEntry } from '../../../utils/analysisResume';
 import { FaPlus, FaTrash, FaPlay, FaStop, FaFolder, FaDatabase, FaFileUpload, FaBroom, FaChevronDown, FaChevronUp } from 'react-icons/fa';
 
 const AnalysisPanel = () => {
@@ -21,14 +22,15 @@ const AnalysisPanel = () => {
         loadChapterFiles,
         analysisResults,
         analysisProgress,
+        shouldResumeAnalysis,
         updateAnalysisResult,
         clearAnalysisResults,
         updateAnalysisProgress,
         startAnalysis,
-        completeAnalysis
+        completeAnalysis,
+        markResumeHandled
     } = useAppContext();
     const { 
-        notifyFileSelected,
         notifyAnalysisProgress,
         notifySuccess,
         notifyError,
@@ -42,9 +44,8 @@ const AnalysisPanel = () => {
     const [folderPath, setFolderPath] = useState('');
     const [activeCacheKey, setActiveCacheKey] = useState('');
     const [isStopping, setIsStopping] = useState(false);
-    
-    // 页面级分析结果缓存（不持久化）
-    const [pageAnalysisCache, setPageAnalysisCache] = useState({});
+    const [resumeLogs, setResumeLogs] = useState([]);
+    const resumePromptLoggedRef = useRef(false);
     
     // 数据源选择：'folder' 或 'cache'
     const [dataSource, setDataSource] = useState('folder');
@@ -54,10 +55,16 @@ const AnalysisPanel = () => {
     
     const availableCacheResults = getAllCachedSplitResults();
     const hasAvailableCache = availableCacheResults.length > 0;
+    const canResumeCurrentQueue = shouldAutoResume(shouldResumeAnalysis, analysisQueue);
 
     useEffect(() => {
         if (hasAvailableCache && dataSource === 'folder') setDataSource('cache');
     }, [hasAvailableCache]);
+
+    const appendResumeLog = useCallback((type, message) => {
+        const item = createResumeLogEntry(type, message);
+        setResumeLogs(prev => [item, ...prev].slice(0, 20));
+    }, []);
 
     const handleSelectFolder = async () => {
         try {
@@ -125,11 +132,11 @@ const AnalysisPanel = () => {
 
     const handleClearResults = () => {
         clearAnalysisResults();
-        setPageAnalysisCache({});
-        notifySuccess('清空结果', '分析结果和页面缓存已清空');
+        setResumeLogs([]);
+        notifySuccess('清空结果', '分析结果已清空');
     };
 
-    const handleStartAnalysis = async () => {
+    const handleStartAnalysis = useCallback(async () => {
         if (analysisQueue.length === 0) { 
             notifyWarning('分析队列为空，请先添加文件到分析队列'); 
             return; 
@@ -137,18 +144,9 @@ const AnalysisPanel = () => {
         
         try {
             setIsStopping(false);
-            
-            // 检查页面缓存
-            const filesToAnalyze = [];
-            const cachedResults = {};
-            for (const file of analysisQueue) {
-                const cached = pageAnalysisCache[file.name];
-                if (cached) {
-                    cachedResults[file.name] = cached;
-                } else {
-                    filesToAnalyze.push(file);
-                }
-            }
+
+            // 检查已完成快照，已完成文件直接复用，未完成文件续跑
+            const { cachedResults, filesToAnalyze } = partitionQueueByResults(analysisQueue, analysisResults);
 
             // 开始分析流程
             startAnalysis(analysisQueue.length);
@@ -198,8 +196,6 @@ const AnalysisPanel = () => {
                     updateAnalysisResult(fileName, `分析失败: ${error}`, true, true);
                 } else {
                     updateAnalysisResult(fileName, result, true, false);
-                    // 保存到页面缓存
-                    setPageAnalysisCache(prev => ({ ...prev, [fileName]: result }));
                 }
                 
                 updateAnalysisProgress({
@@ -223,7 +219,20 @@ const AnalysisPanel = () => {
             });
             notifyError('分析', error.message);
         }
-    };
+    }, [
+        analysisQueue,
+        analysisResults,
+        startAnalysis,
+        completeAnalysis,
+        updateAnalysisProgress,
+        updateAnalysisResult,
+        analyzeMultipleFiles,
+        isStopping,
+        notifyWarning,
+        notifySuccess,
+        notifyError,
+        notifyAnalysisProgress
+    ]);
 
     const handleStop = () => {
         if (!analysisProgress.isAnalyzing) return;
@@ -231,6 +240,54 @@ const AnalysisPanel = () => {
         updateAnalysisProgress({ isAnalyzing: false });
         notifyWarning('分析已请求停止');
     };
+
+    // 刷新后出现续跑提示，不自动执行，交给用户确认
+    useEffect(() => {
+        if (!shouldResumeAnalysis) {
+            resumePromptLoggedRef.current = false;
+            return;
+        }
+
+        if (!canResumeCurrentQueue) {
+            markResumeHandled();
+            appendResumeLog('resume-missed', '检测到中断任务，但队列为空，无法续跑');
+            notifyWarning('续跑', '检测到中断任务，但当前队列为空，无法自动续跑');
+            return;
+        }
+
+        if (!resumePromptLoggedRef.current) {
+            appendResumeLog('resume-detected', `检测到中断任务，待续跑队列 ${analysisQueue.length} 个文件`);
+            resumePromptLoggedRef.current = true;
+        }
+    }, [
+        shouldResumeAnalysis,
+        canResumeCurrentQueue,
+        analysisQueue.length,
+        appendResumeLog,
+        markResumeHandled,
+        notifyWarning
+    ]);
+
+    const handleResumeNow = useCallback(async () => {
+        if (analysisProgress.isAnalyzing || isAnalyzing) {
+            return;
+        }
+        markResumeHandled();
+        appendResumeLog('resume-started', '已确认继续未完成任务');
+        await handleStartAnalysis();
+    }, [
+        analysisProgress.isAnalyzing,
+        isAnalyzing,
+        markResumeHandled,
+        appendResumeLog,
+        handleStartAnalysis
+    ]);
+
+    const handleResumeDismiss = useCallback(() => {
+        markResumeHandled();
+        appendResumeLog('resume-dismissed', '已暂不续跑，可稍后手动点击开始分析');
+        notifyWarning('续跑', '已暂不续跑，可稍后手动点击开始分析');
+    }, [markResumeHandled, appendResumeLog, notifyWarning]);
 
     const handleAddToQueue = () => {
         const selectedFiles = chapterFiles.filter(file => file.selected);
@@ -264,6 +321,19 @@ const AnalysisPanel = () => {
                     </div>
                 </div>
             </div>
+
+            {canResumeCurrentQueue && (
+                <div className={styles.resumeCard}>
+                    <div className={styles.resumeTitle}>检测到上次分析中断</div>
+                    <div className={styles.resumeDesc}>
+                        已恢复已完成结果，未完成任务可一键继续。
+                    </div>
+                    <div className={styles.resumeActions}>
+                        <Button icon={<FaPlay />} label="继续未完成任务" onClick={handleResumeNow} />
+                        <Button icon={<FaStop />} label="暂不续跑" variant="secondary" onClick={handleResumeDismiss} />
+                    </div>
+                </div>
+            )}
 
             {dataSource === 'folder' && (
                 <div className={styles.folderSection}>
@@ -329,6 +399,22 @@ const AnalysisPanel = () => {
                     <ProgressBar percentage={analysisProgress.progress} />
                 </div>
             </div>
+
+            {resumeLogs.length > 0 && (
+                <div className={styles.resumeLogSection}>
+                    <h4>续跑日志</h4>
+                    <div className={styles.resumeLogList}>
+                        {resumeLogs.map((item) => (
+                            <div key={item.id} className={styles.resumeLogItem}>
+                                <span className={styles.resumeLogTime}>
+                                    {new Date(item.timestamp).toLocaleTimeString()}
+                                </span>
+                                <span className={styles.resumeLogMsg}>{item.message}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* 调试信息（原始输出） - 始终显示，但内容根据状态变化 */}
             <div className={styles.resultsPreview}>

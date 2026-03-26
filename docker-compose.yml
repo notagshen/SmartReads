@@ -4,7 +4,8 @@ services:
   smartreads-web:
     build: .
     ports:
-      - "4173:4173"
+      - "9220:4173"
     environment:
       - NODE_ENV=production
+      - UPSTREAM_API_BASE_URL=https://axonhub.052222.xyz/v1
     restart: unless-stopped

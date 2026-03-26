@@ -1,6 +1,12 @@
 import { useState, useCallback } from 'react';
 import { useNotification } from '../contexts/NotificationContext';
 import { useAppContext } from '../contexts/AppContext';
+import { buildApiUrl, normalizeApiBaseUrl, PROXY_API_BASE_URL } from '../utils/apiBaseUrl';
+import {
+    buildChatCompletionRequestBody,
+    extractCompletionTextFromJson,
+    extractStreamChunkText
+} from '../utils/chatApiCompat';
 
 /**
  * AI分析Hook
@@ -11,6 +17,19 @@ export const useAnalyzer = () => {
     const { addNotification } = useNotification();
     const { settings } = useAppContext();
     const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+    const parseErrorMessage = useCallback((status, fallbackStatusText, payload) => {
+        if (!payload) {
+            return `${status} ${fallbackStatusText}`;
+        }
+
+        if (typeof payload === 'string') {
+            return `${status} ${payload.slice(0, 120)}`;
+        }
+
+        const msg = payload.error?.message || payload.message || fallbackStatusText;
+        return `${status} ${msg}`;
+    }, []);
 
     // 分析提示词模板（与Python版本完全一致）
     const getAnalysisPrompt = useCallback((content) => {
@@ -55,71 +74,112 @@ ${content}`;
     // 调用API进行分析
     const callAnalysisAPI = useCallback(async (content, onProgress) => {
         try {
-            const response = await fetch(settings.baseUrl + '/chat/completions', {
+            const requestBody = buildChatCompletionRequestBody({
+                model: settings.model,
+                prompt: getAnalysisPrompt(content),
+                temperature: settings.temperature,
+                maxTokens: settings.maxTokens,
+                stream: true
+            });
+
+            const response = await fetch(buildApiUrl(PROXY_API_BASE_URL, '/chat/completions'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${settings.apiKey}`
+                    'Authorization': `Bearer ${settings.apiKey}`,
+                    'X-Upstream-Base-Url': normalizeApiBaseUrl(settings.baseUrl)
                 },
-                body: JSON.stringify({
-                    model: settings.model,
-                    messages: [
-                        {
-                            role: 'user',
-                            content: getAnalysisPrompt(content)
-                        }
-                    ],
-                    temperature: settings.temperature,
-                    max_tokens: settings.maxTokens,
-                    stream: true // 启用流式响应
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(`API调用失败: ${response.status} ${errorData.error?.message || response.statusText}`);
+                const rawErrorText = await response.text().catch(() => '');
+                let errorPayload = null;
+                if (rawErrorText) {
+                    try {
+                        errorPayload = JSON.parse(rawErrorText);
+                    } catch (e) {
+                        errorPayload = rawErrorText;
+                    }
+                }
+                throw new Error(`API调用失败: ${parseErrorMessage(response.status, response.statusText, errorPayload)}`);
             }
 
-            // 处理流式响应
-            const reader = response.body.getReader();
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('text/event-stream')) {
+                const rawText = await response.text().catch(() => '');
+                let payload = null;
+                if (rawText) {
+                    try {
+                        payload = JSON.parse(rawText);
+                    } catch (e) {
+                        payload = null;
+                    }
+                }
+                const directText = extractCompletionTextFromJson(payload);
+                if (directText) {
+                    if (onProgress) {
+                        onProgress({ text: directText });
+                    }
+                    return directText;
+                }
+                throw new Error('API返回成功，但响应中缺少可用文本（message.content/reasoning_content）');
+            }
+
+            // 处理SSE流式响应（兼容 content / reasoning_content）
+            const reader = response.body?.getReader();
+            if (!reader) {
+                throw new Error('流式响应不可读');
+            }
+
             const decoder = new TextDecoder();
             let result = '';
+            let buffer = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split(/\r?\n/);
+                buffer = lines.pop() || '';
 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        if (data === '[DONE]') continue;
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith('data:')) {
+                        continue;
+                    }
 
-                        try {
-                            const parsed = JSON.parse(data);
-                            const content = parsed.choices?.[0]?.delta?.content;
-                            if (content) {
-                                result += content;
-                                // 调用进度回调
-                                if (onProgress) {
-                                    onProgress({ text: content });
-                                }
+                    const data = trimmed.slice(5).trim();
+                    if (!data || data === '[DONE]') {
+                        continue;
+                    }
+
+                    try {
+                        const parsed = JSON.parse(data);
+                        const textChunk = extractStreamChunkText(parsed);
+                        if (textChunk) {
+                            result += textChunk;
+                            if (onProgress) {
+                                onProgress({ text: textChunk });
                             }
-                        } catch (e) {
-                            // 忽略解析错误
                         }
+                    } catch (e) {
+                        // 忽略单个分片解析错误，继续读后续事件
                     }
                 }
             }
 
-            return result;
+            if (result.trim()) {
+                return result;
+            }
+
+            throw new Error('API返回成功，但流式响应中未解析到文本内容');
 
         } catch (error) {
             throw new Error(`分析请求失败: ${error.message}`);
         }
-    }, [settings, getAnalysisPrompt]);
+    }, [settings, getAnalysisPrompt, parseErrorMessage]);
 
     // 分析单个文件
     const analyzeSingleFile = useCallback(async (fileName, content, onProgress) => {
@@ -259,10 +319,11 @@ ${content}`;
             const baseUrl = overrides.baseUrl ?? settings.baseUrl;
             if (!apiKey) throw new Error('请先配置API密钥');
 
-            const response = await fetch(baseUrl + '/models', {
+            const response = await fetch(buildApiUrl(PROXY_API_BASE_URL, '/models'), {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${apiKey}`
+                    'Authorization': `Bearer ${apiKey}`,
+                    'X-Upstream-Base-Url': normalizeApiBaseUrl(baseUrl)
                 }
             });
 

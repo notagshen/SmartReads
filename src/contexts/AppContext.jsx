@@ -1,8 +1,17 @@
 import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import { useCache } from './CacheContext';
 import { saveJSON, loadJSON, clearNamespace } from '../utils/storage';
+import { DEFAULT_UPSTREAM_BASE_URL } from '../utils/apiBaseUrl';
 
 const AppContext = createContext();
+const ANALYSIS_RUNTIME_KEY = 'analysis-runtime';
+const DEFAULT_ANALYSIS_PROGRESS = {
+    isAnalyzing: false,
+    currentFile: '',
+    progress: 0,
+    totalFiles: 0,
+    completedFiles: 0
+};
 
 export const useAppContext = () => useContext(AppContext);
 
@@ -13,7 +22,7 @@ export const AppProvider = ({ children }) => {
     const [analysisQueue, setAnalysisQueue] = useState([]);
     const [settings, setSettings] = useState({
         apiKey: '',
-        baseUrl: 'https://api.openai.com/v1',
+        baseUrl: DEFAULT_UPSTREAM_BASE_URL,
         model: 'gpt-3.5-turbo',
         temperature: 0.7,
         maxTokens: 4000
@@ -28,18 +37,14 @@ export const AppProvider = ({ children }) => {
 
     // 全局分析结果状态 - 支持实时流式显示
     const [analysisResults, setAnalysisResults] = useState({});
-    const [analysisProgress, setAnalysisProgress] = useState({
-        isAnalyzing: false,
-        currentFile: '',
-        progress: 0,
-        totalFiles: 0,
-        completedFiles: 0
-    });
+    const [analysisProgress, setAnalysisProgress] = useState(DEFAULT_ANALYSIS_PROGRESS);
+    const [shouldResumeAnalysis, setShouldResumeAnalysis] = useState(false);
 
     const { cache, cacheChapterFiles, cacheAnalysisQueue, clearCache: clearCacheContext } = useCache();
 
     // 标记：是否已完成从缓存的首次回填
     const hydratedRef = useRef(false);
+    const analysisHydratedRef = useRef(false);
 
     // 初始化：从本地存储加载settings与theme
     useEffect(() => {
@@ -59,6 +64,26 @@ export const AppProvider = ({ children }) => {
         }
     }, []);
 
+    // 恢复分析运行时快照（用于刷新后续跑）
+    useEffect(() => {
+        const runtime = loadJSON(ANALYSIS_RUNTIME_KEY, null, { version: 'v1' });
+        if (runtime && typeof runtime === 'object') {
+            if (runtime.analysisResults && typeof runtime.analysisResults === 'object') {
+                setAnalysisResults(runtime.analysisResults);
+            }
+            if (runtime.analysisProgress && typeof runtime.analysisProgress === 'object') {
+                const restored = { ...DEFAULT_ANALYSIS_PROGRESS, ...runtime.analysisProgress };
+                if (restored.isAnalyzing) {
+                    // 浏览器刷新后网络连接已断，标记为待续跑
+                    setShouldResumeAnalysis(true);
+                    restored.isAnalyzing = false;
+                }
+                setAnalysisProgress(restored);
+            }
+        }
+        analysisHydratedRef.current = true;
+    }, []);
+
     // 去抖保存settings
     const saveTimer = useRef(null);
     useEffect(() => {
@@ -70,6 +95,20 @@ export const AppProvider = ({ children }) => {
         }, 250);
         return () => saveTimer.current && clearTimeout(saveTimer.current);
     }, [settings, theme]);
+
+    // 持久化分析运行时快照
+    useEffect(() => {
+        if (!analysisHydratedRef.current) return;
+        saveJSON(
+            ANALYSIS_RUNTIME_KEY,
+            {
+                analysisResults,
+                analysisProgress,
+                savedAt: Date.now()
+            },
+            { version: 'v1' }
+        );
+    }, [analysisResults, analysisProgress]);
 
     // 仅在首帧从缓存回填一次，避免与写回缓存互相触发
     useEffect(() => {
@@ -234,13 +273,8 @@ export const AppProvider = ({ children }) => {
 
     const clearAnalysisResults = () => {
         setAnalysisResults({});
-        setAnalysisProgress({
-            isAnalyzing: false,
-            currentFile: '',
-            progress: 0,
-            totalFiles: 0,
-            completedFiles: 0
-        });
+        setAnalysisProgress(DEFAULT_ANALYSIS_PROGRESS);
+        setShouldResumeAnalysis(false);
     };
 
     const updateAnalysisProgress = (progressData) => {
@@ -267,6 +301,10 @@ export const AppProvider = ({ children }) => {
             progress: 100,
             currentFile: ''
         }));
+    };
+
+    const markResumeHandled = () => {
+        setShouldResumeAnalysis(false);
     };
 
     const value = {
@@ -303,11 +341,13 @@ export const AppProvider = ({ children }) => {
         // 分析结果管理
         analysisResults,
         analysisProgress,
+        shouldResumeAnalysis,
         updateAnalysisResult,
         clearAnalysisResults,
         updateAnalysisProgress,
         startAnalysis,
-        completeAnalysis
+        completeAnalysis,
+        markResumeHandled
     };
 
     return (

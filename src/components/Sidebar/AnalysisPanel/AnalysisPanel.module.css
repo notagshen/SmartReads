@@ -149,6 +149,77 @@
     opacity: 0.8;
 }
 
+.resumeCard {
+    border: 1px solid var(--glass-border);
+    border-left: 4px solid var(--warning-color, #f59e0b);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.resumeTitle {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.resumeDesc {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.resumeActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-sm);
+}
+
+.resumeLogSection {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    padding: var(--spacing-md);
+}
+
+.resumeLogSection h4 {
+    margin: 0 0 var(--spacing-sm) 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.resumeLogList {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    max-height: 140px;
+    overflow-y: auto;
+}
+
+.resumeLogItem {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: flex-start;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+.resumeLogTime {
+    color: var(--text-muted);
+    min-width: 64px;
+    flex-shrink: 0;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.resumeLogMsg {
+    line-height: 1.4;
+    word-break: break-word;
+}
+
 /* 缓存选择器 */
 .cacheSelector {
     margin-bottom: var(--spacing-lg);
@@ -351,6 +422,10 @@
     .sourceOptions {
         flex-direction: column;
     }
+
+    .resumeActions {
+        grid-template-columns: 1fr;
+    }
     
     .sourceOption .icon {
         font-size: 1.25rem;
@@ -372,6 +447,10 @@
     
     .resultsPreview {
         margin-top: var(--spacing-md);
+    }
+
+    .resumeLogTime {
+        min-width: 56px;
     }
 }
 

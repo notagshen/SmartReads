@@ -110,3 +110,19 @@ export const fetchRemoteShareMarkdown = async (id) => {
 
     return payload.markdown;
 };
+
+export const updateRemoteShareMarkdown = async (id, markdown) => {
+    const response = await fetch(`${SHARE_API_PREFIX}/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown })
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const message = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
+        throw new Error(message);
+    }
+
+    return payload;
+};

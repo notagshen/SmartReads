@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useRef, useEffect, useState } from 'react'
 import styles from './ContentPanel.module.css';
 import { useOptimizedNotifications } from '../../hooks/useOptimizedNotifications';
 import { useAppContext } from '../../contexts/AppContext';
-import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt } from 'react-icons/fa';
+import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt, FaEdit } from 'react-icons/fa';
 import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable, extractChapterNumbersFromRows } from '../../utils/chapterTable';
 import { extractChapterNumbersFromFileName, uniqueNumbersInOrder } from '../../utils/chapterNumber';
 import { buildShareDisplayResults } from '../../utils/shareDisplay';
@@ -11,7 +11,8 @@ import {
     parseShareLink,
     createRemoteShare,
     parseRemoteShareId,
-    fetchRemoteShareMarkdown
+    fetchRemoteShareMarkdown,
+    updateRemoteShareMarkdown
 } from '../../utils/shareLink';
 
 const ContentPanel = () => {
@@ -20,7 +21,11 @@ const ContentPanel = () => {
     const importInputRef = useRef(null);
     const lastShareTokenRef = useRef('');
     const [shareView, setShareView] = useState(null);
+    const [isEditingShare, setIsEditingShare] = useState(false);
+    const [editableRows, setEditableRows] = useState([]);
+    const [isSavingShareEdit, setIsSavingShareEdit] = useState(false);
     const isShareOnlyView = Boolean(shareView);
+    const canEditRemoteShare = Boolean(isShareOnlyView && shareView?.meta?.remoteShareId);
 
     // JSON数组解析函数
     const parseJSONArray = useCallback((str) => {
@@ -96,14 +101,79 @@ const ContentPanel = () => {
     // 获取表格数据用于复制和导出
     const getTableContent = useCallback(() => {
         const { headers, rows } = combinedTableData;
-        
-        if (headers.length === 0 || rows.length === 0) {
+        const activeRows = isEditingShare ? editableRows : rows;
+
+        if (headers.length === 0 || activeRows.length === 0) {
             return '';
         }
-        
-        // 生成Markdown表格格式
-        return buildMarkdownTable(headers, rows);
-    }, [combinedTableData]);
+
+        return buildMarkdownTable(headers, activeRows);
+    }, [combinedTableData, editableRows, isEditingShare]);
+
+    const handleEditCellChange = useCallback((rowIndex, cellIndex, value) => {
+        setEditableRows(prev => {
+            const next = prev.map(row => [...row]);
+            if (!next[rowIndex]) return prev;
+            next[rowIndex][cellIndex] = value;
+            return next;
+        });
+    }, []);
+
+    const handleToggleShareEdit = useCallback(async () => {
+        if (!canEditRemoteShare || isSavingShareEdit) return;
+
+        if (!isEditingShare) {
+            if (combinedTableData.rows.length === 0) {
+                notifyError('编辑', '当前分享内容无可编辑表格');
+                return;
+            }
+            setEditableRows(combinedTableData.rows.map(row => [...row]));
+            setIsEditingShare(true);
+            notifySuccess('编辑', '已进入编辑模式');
+            return;
+        }
+
+        const remoteShareId = shareView?.meta?.remoteShareId;
+        if (!remoteShareId) {
+            notifyError('编辑', '当前分享链接不支持保存');
+            return;
+        }
+
+        try {
+            setIsSavingShareEdit(true);
+            const markdown = buildMarkdownTable(combinedTableData.headers, editableRows);
+            await updateRemoteShareMarkdown(remoteShareId, markdown);
+
+            const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(editableRows));
+            setShareView(prev => prev ? ({
+                ...prev,
+                content: markdown,
+                meta: {
+                    ...(prev.meta || {}),
+                    expectedChapterNumbers: importedNumbers,
+                    remoteShareId
+                },
+                timestamp: Date.now()
+            }) : prev);
+
+            setIsEditingShare(false);
+            notifySuccess('编辑', '已保存到当前分享链接');
+        } catch (error) {
+            notifyError('编辑', `保存失败: ${error.message}`);
+        } finally {
+            setIsSavingShareEdit(false);
+        }
+    }, [
+        canEditRemoteShare,
+        isSavingShareEdit,
+        isEditingShare,
+        combinedTableData.rows,
+        combinedTableData.headers,
+        editableRows,
+        shareView,
+        notifyError,
+        notifySuccess
+    ]);
 
     const handleCopy = async () => {
         const content = getTableContent();
@@ -246,6 +316,11 @@ const ContentPanel = () => {
     };
 
     useEffect(() => {
+        setIsEditingShare(false);
+        setEditableRows([]);
+    }, [shareView?.meta?.remoteShareId, isShareOnlyView]);
+
+    useEffect(() => {
         const loadFromShare = async () => {
             const remoteShareId = parseRemoteShareId(window.location.search);
             const hash = window.location.hash || '';
@@ -370,8 +445,9 @@ const ContentPanel = () => {
     // 渲染表格
     const renderTable = () => {
         const { headers, rows } = combinedTableData;
+        const tableRows = isEditingShare ? editableRows : rows;
         
-        if (headers.length === 0 || rows.length === 0) {
+        if (headers.length === 0 || tableRows.length === 0) {
             return (
                 <div className={styles.emptyTable}>
                     <div className={styles.emptyIcon}>
@@ -394,21 +470,31 @@ const ContentPanel = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {rows.map((row, rowIndex) => (
+                        {tableRows.map((row, rowIndex) => (
                             <tr key={rowIndex}>
                                 {row.map((cell, cellIndex) => (
                                     <td key={cellIndex}>
-                                        {/* 处理JSON数组格式的单元格 */}
-                                        {cell.includes('[') && cell.includes(']') ? (
-                                            <div className={styles.jsonArrayCell}>
-                                                {parseJSONArray(cell).map((item, itemIndex) => (
-                                                    <span key={itemIndex} className={styles.arrayItem}>
-                                                        {item}
-                                                    </span>
-                                                ))}
-                                            </div>
+                                        {isEditingShare ? (
+                                            <textarea
+                                                className={styles.editCellInput}
+                                                value={cell}
+                                                onChange={(event) => handleEditCellChange(rowIndex, cellIndex, event.target.value)}
+                                            />
                                         ) : (
-                                            cell
+                                            <>
+                                                {/* 处理JSON数组格式的单元格 */}
+                                                {cell.includes('[') && cell.includes(']') ? (
+                                                    <div className={styles.jsonArrayCell}>
+                                                        {parseJSONArray(cell).map((item, itemIndex) => (
+                                                            <span key={itemIndex} className={styles.arrayItem}>
+                                                                {item}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    cell
+                                                )}
+                                            </>
                                         )}
                                     </td>
                                 ))}
@@ -450,17 +536,28 @@ const ContentPanel = () => {
                     <button 
                         className={styles.actionButton}
                         onClick={handleCopy}
-                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
+                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit}
                         title="复制表格数据"
                     >
                         <FaCopy />
                         复制
                     </button>
+                    {canEditRemoteShare && (
+                        <button
+                            className={styles.actionButton}
+                            onClick={handleToggleShareEdit}
+                            disabled={combinedTableData.headers.length === 0 || isSavingShareEdit}
+                            title={isEditingShare ? '结束编辑并保存到分享链接' : '编辑分享内容'}
+                        >
+                            {isSavingShareEdit ? <FaSpinner className={styles.spinningIcon} /> : <FaEdit />}
+                            {isEditingShare ? '结束编辑' : '编辑'}
+                        </button>
+                    )}
                     {!isShareOnlyView && (
                         <button
                             className={styles.actionButton}
                             onClick={handleShare}
-                            disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
+                            disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit}
                             title="分享表格数据"
                         >
                             <FaShareAlt />
@@ -470,7 +567,7 @@ const ContentPanel = () => {
                     <button 
                         className={styles.actionButton}
                         onClick={handleExport}
-                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid}
+                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit}
                         title="导出表格数据"
                     >
                         <FaDownload />
@@ -493,7 +590,7 @@ const ContentPanel = () => {
                     );
                 })()}
 
-                {!analysisProgress.isAnalyzing && combinedTableData.rows.length > 0 && !combinedTableData.continuity?.isValid && (
+                {!analysisProgress.isAnalyzing && !isEditingShare && combinedTableData.rows.length > 0 && !combinedTableData.continuity?.isValid && (
                     <div className={styles.simpleProgress}>
                         <span>
                             章节连续性校验未通过：

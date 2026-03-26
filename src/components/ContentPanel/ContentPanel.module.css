@@ -85,6 +85,12 @@
     display: flex;
     gap: var(--spacing-md);
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.hiddenInput {
+    display: none;
 }
 
 /* 卡头按钮组：胶囊 + 悬停品牌渐变 */

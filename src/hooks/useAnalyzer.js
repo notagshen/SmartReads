@@ -18,6 +18,11 @@ import {
     applyExpectedChapterNumbers,
     validateChapterContinuity
 } from '../utils/chapterTable';
+import {
+    shouldApplyBalancedTruncation,
+    getBalancedTruncationTargetLength,
+    getBalancedTruncationThreshold
+} from '../utils/truncationPolicy';
 
 /**
  * AI分析Hook
@@ -80,6 +85,36 @@ export const useAnalyzer = () => {
             throw new Error('表格重建失败');
         }
         return rebuilt;
+    }, []);
+
+    const buildChapterBalancedExcerpt = useCallback((content, targetLength) => {
+        const headingPattern = /(^\s*(?:第\s*[0-9一二三四五六七八九十百千零]+\s*[章回节卷篇]|(?:Chapter|CHAPTER)\s*\d+|序章|楔子|尾声|后记|番外)[^\n]*\n)/gm;
+        const parts = String(content).split(headingPattern);
+
+        if (parts.length <= 1) {
+            return String(content).slice(0, targetLength);
+        }
+
+        const chapterBlocks = [];
+        for (let i = 1; i < parts.length; i += 2) {
+            const title = parts[i] || '';
+            const body = i + 1 < parts.length ? parts[i + 1] : '';
+            chapterBlocks.push(`${title}${body}`);
+        }
+
+        if (chapterBlocks.length === 0) {
+            return String(content).slice(0, targetLength);
+        }
+
+        const minPerChapter = 500;
+        const chapterBudget = Math.max(minPerChapter, Math.floor(targetLength / chapterBlocks.length));
+
+        const clipped = chapterBlocks.map((block) => {
+            if (block.length <= chapterBudget) return block;
+            return `${block.slice(0, chapterBudget)}\n...(本章内容已截断)...\n`;
+        }).join('\n\n');
+
+        return clipped.slice(0, targetLength);
     }, []);
 
     // 分析提示词模板（与Python版本完全一致）
@@ -257,13 +292,15 @@ ${content}`;
 
             const expectedNumbers = resolveExpectedChapterNumbers(fileName, content, file?.chapterNumbers);
 
-            // 如果内容过长，截取前80%用于分析
+            // 默认不截断，仅在超阈值时进行章节均衡截断
             let analysisContent = content;
-            if (content.length > settings.maxTokens * 3) { // 粗略估算token数
-                analysisContent = content.substring(0, Math.floor(content.length * 0.8));
+            if (shouldApplyBalancedTruncation(content.length, settings.maxTokens, settings.truncationThresholdChars)) {
+                const threshold = getBalancedTruncationThreshold(settings.maxTokens, settings.truncationThresholdChars);
+                const targetLength = getBalancedTruncationTargetLength(content.length, settings.maxTokens, settings.truncationThresholdChars);
+                analysisContent = buildChapterBalancedExcerpt(content, targetLength);
                 if (onProgress) {
                     onProgress({ 
-                        text: `\n⚠️ 注意：由于内容较长，将分析前80%的内容（约${Math.round(analysisContent.length/1000)}千字）\n\n` 
+                        text: `\n⚠️ 注意：内容超过阈值（${Math.round(threshold / 1000)}千字），已按章节均衡截断到约${Math.round(analysisContent.length / 1000)}千字\n\n`
                     });
                 }
             }
@@ -306,7 +343,7 @@ ${content}`;
             }
             throw new Error(errorMessage);
         }
-    }, [settings, callAnalysisAPI, normalizeAndValidateResult, resolveExpectedChapterNumbers]);
+    }, [settings, callAnalysisAPI, normalizeAndValidateResult, resolveExpectedChapterNumbers, buildChapterBalancedExcerpt]);
 
     // 批量分析文件
     const analyzeMultipleFiles = useCallback(async (files, onProgress, onFileComplete) => {

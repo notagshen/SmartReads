@@ -13,7 +13,7 @@ const PreprocessPanel = () => {
     const [activeTab, setActiveTab] = useState('epub');
     const [epubFile, setEpubFile] = useState(null);
     const [novelFile, setNovelFile] = useState(null);
-    const [chapterGroupSize, setChapterGroupSize] = useState('50');
+    const [chapterGroupSize, setChapterGroupSize] = useState('5');
     
     // 章节拆分数据源选择
     const [splitDataSource, setSplitDataSource] = useState('file'); // 'file' 或 'cache'
@@ -59,6 +59,7 @@ const PreprocessPanel = () => {
     } = useFileHandler();
 
     const chapterGroupOptions = [
+        { value: '5', label: '5章/组' },
         { value: '10', label: '10章/组' },
         { value: '20', label: '20章/组' },
         { value: '50', label: '50章/组' },

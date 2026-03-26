@@ -4,7 +4,7 @@ services:
   smartreads-web:
     image: ghcr.io/notagshen/smartreads:arm64-latest
     ports:
-      - "9220:4173"
+      - "4173:4173"
     environment:
       - NODE_ENV=production
       # Neon PostgreSQL 连接串（用于分享链接存储）

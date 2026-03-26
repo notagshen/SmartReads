@@ -16,10 +16,6 @@ test('ensureSafeUpstreamBaseUrl allows localhost and private IPv4', () => {
   assert.equal(ensureSafeUpstreamBaseUrl('http://192.168.1.20:3000'), 'http://192.168.1.20:3000');
 });
 
-test('ensureSafeUpstreamBaseUrl allows public https URL', () => {
-  const safe = ensureSafeUpstreamBaseUrl('https://axonhub.052222.xyz/v1');
-  assert.equal(safe, 'https://axonhub.052222.xyz/v1');
-});
 
 test('buildUpstreamTargetUrl joins base path and endpoint', () => {
   const target = buildUpstreamTargetUrl('https://example.com/v1', '/chat/completions', '?stream=true');

@@ -7,8 +7,7 @@ services:
       - "9220:4173"
     environment:
       - NODE_ENV=production
-      - UPSTREAM_API_BASE_URL=https://axonhub.052222.xyz/v1
       # Neon PostgreSQL 连接串（用于分享链接存储）
       # 例如: postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/dbname?sslmode=require
-      - NEON_DATABASE_URL=
+#      - NEON_DATABASE_URL=
     restart: unless-stopped

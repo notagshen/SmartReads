@@ -5,7 +5,13 @@ import { useAppContext } from '../../contexts/AppContext';
 import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt } from 'react-icons/fa';
 import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable, extractChapterNumbersFromRows } from '../../utils/chapterTable';
 import { extractChapterNumbersFromFileName, uniqueNumbersInOrder } from '../../utils/chapterNumber';
-import { buildShareLink, parseShareLink } from '../../utils/shareLink';
+import {
+    buildShareLink,
+    parseShareLink,
+    createRemoteShare,
+    parseRemoteShareId,
+    fetchRemoteShareMarkdown
+} from '../../utils/shareLink';
 
 const ContentPanel = () => {
     const { notifySuccess, notifyError } = useOptimizedNotifications();
@@ -191,10 +197,15 @@ const ContentPanel = () => {
 
         let shareUrl = '';
         try {
-            shareUrl = buildShareLink(content, window.location.href);
+            shareUrl = await createRemoteShare(content);
         } catch (error) {
-            notifyError('分享', error.message);
-            return;
+            try {
+                shareUrl = buildShareLink(content, window.location.href);
+                notifySuccess('分享', '分享服务不可用，已回退为本地压缩链接');
+            } catch (fallbackError) {
+                notifyError('分享', `生成分享链接失败: ${error.message}；${fallbackError.message}`);
+                return;
+            }
         }
 
         try {
@@ -219,39 +230,61 @@ const ContentPanel = () => {
     useEffect(() => {
         if (shareImportedRef.current) return;
 
-        let markdown = null;
-        try {
-            markdown = parseShareLink(window.location.hash);
-        } catch (error) {
-            notifyError('分享链接', error.message);
-            shareImportedRef.current = true;
-            return;
-        }
+        const remoteShareId = parseRemoteShareId(window.location.search);
 
-        if (!markdown) return;
-
-        try {
-            const { headers, rows } = parseMarkdownTable(markdown);
-            if (headers.length === 0 || rows.length === 0) {
-                throw new Error('分享链接内容不包含有效表格');
+        const loadFromShare = async () => {
+            let markdown = null;
+            if (remoteShareId) {
+                try {
+                    markdown = await fetchRemoteShareMarkdown(remoteShareId);
+                } catch (error) {
+                    notifyError('分享链接', `读取远程分享失败: ${error.message}`);
+                    shareImportedRef.current = true;
+                    return;
+                }
             }
 
-            const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(rows));
-            clearAnalysisResults();
-            updateAnalysisResult(
-                '分享链接导入.md',
-                markdown,
-                true,
-                false,
-                { expectedChapterNumbers: importedNumbers, importedFromShareLink: true }
-            );
+            if (!markdown) {
+                try {
+                    markdown = parseShareLink(window.location.hash);
+                } catch (error) {
+                    notifyError('分享链接', error.message);
+                    shareImportedRef.current = true;
+                    return;
+                }
+            }
 
-            shareImportedRef.current = true;
-            notifySuccess('分享链接', '已从链接加载分析结果');
-        } catch (error) {
-            notifyError('分享链接', `加载失败: ${error.message}`);
-            shareImportedRef.current = true;
-        }
+            if (!markdown) return;
+
+            try {
+                const { headers, rows } = parseMarkdownTable(markdown);
+                if (headers.length === 0 || rows.length === 0) {
+                    throw new Error('分享链接内容不包含有效表格');
+                }
+
+                const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(rows));
+                clearAnalysisResults();
+                updateAnalysisResult(
+                    remoteShareId ? `远程分享_${remoteShareId}.md` : '分享链接导入.md',
+                    markdown,
+                    true,
+                    false,
+                    {
+                        expectedChapterNumbers: importedNumbers,
+                        importedFromShareLink: true,
+                        remoteShareId: remoteShareId || null
+                    }
+                );
+
+                shareImportedRef.current = true;
+                notifySuccess('分享链接', '已从链接加载分析结果');
+            } catch (error) {
+                notifyError('分享链接', `加载失败: ${error.message}`);
+                shareImportedRef.current = true;
+            }
+        };
+
+        loadFromShare();
     }, [clearAnalysisResults, notifyError, notifySuccess, updateAnalysisResult]);
 
     // 获取简化的进度信息

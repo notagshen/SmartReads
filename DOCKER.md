@@ -9,7 +9,9 @@
 docker build -t smartreads-web .
 
 # 运行容器
-docker run -p 4173:4173 smartreads-web
+docker run -p 4173:4173 \
+  -e NEON_DATABASE_URL="postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require" \
+  smartreads-web
 ```
 
 ### 2. 使用 Docker Compose（推荐）
@@ -45,3 +47,4 @@ docker-compose build --no-cache
 - 首次构建可能需要几分钟时间
 - 前端基础URL填写用户自己的上游地址（例如 `https://axonhub.052222.xyz/v1`）
 - 项目会通过同源 `/api/proxy` 在后端中转，避免浏览器跨域
+- 若要启用“链接分享”（长内容），请配置 `NEON_DATABASE_URL`（或 `DATABASE_URL`）

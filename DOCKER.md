@@ -2,26 +2,28 @@
 
 ## 快速开始
 
-### 1. 构建并运行容器
+### 1. 拉取并运行容器
 
 ```bash
-# 构建镜像
-docker build -t smartreads-web .
+# 拉取 ARM64 镜像
+docker pull ghcr.io/notagshen/smartreads:arm64-latest
 
 # 运行容器
 docker run -p 4173:4173 \
+  --name smartreads-web \
+  -e NODE_ENV=production \
   -e NEON_DATABASE_URL="postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require" \
-  smartreads-web
+  ghcr.io/notagshen/smartreads:arm64-latest
 ```
 
 ### 2. 使用 Docker Compose（推荐）
 
 ```bash
-# 构建并启动
-docker-compose up --build
+# 启动（镜像模式）
+docker-compose up -d
 
-# 后台运行
-docker-compose up -d --build
+# 查看当前服务状态
+docker-compose ps
 ```
 
 ### 3. 访问应用
@@ -37,14 +39,15 @@ docker-compose down
 # 查看日志
 docker-compose logs -f
 
-# 重新构建
-docker-compose build --no-cache
+# 拉取最新镜像后重启
+docker-compose pull && docker-compose up -d
 ```
 
 ## 注意事项
 
 - 确保端口4173未被占用
-- 首次构建可能需要几分钟时间
+- 首次拉取镜像可能需要几分钟时间
 - 前端基础URL填写用户自己的上游地址（例如 `https://axonhub.052222.xyz/v1`）
 - 项目会通过同源 `/api/proxy` 在后端中转，避免浏览器跨域
+- `UPSTREAM_API_BASE_URL` 为保留兼容变量，当前版本以页面设置中的 `baseUrl` 为准（通过 `X-Upstream-Base-Url` 传入后端）
 - 若要启用“链接分享”（长内容），请配置 `NEON_DATABASE_URL`（或 `DATABASE_URL`）

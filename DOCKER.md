@@ -47,7 +47,7 @@ docker-compose pull && docker-compose up -d
 
 - 确保端口4173未被占用
 - 首次拉取镜像可能需要几分钟时间
-- 前端基础URL填写用户自己的上游地址（例如 `https://axonhub.052222.xyz/v1`）
+- 前端基础URL填写用户自己的上游地址（例如 `https://api.openai.com/v1`）
 - 项目会通过同源 `/api/proxy` 在后端中转，避免浏览器跨域
 - `UPSTREAM_API_BASE_URL` 为保留兼容变量，当前版本以页面设置中的 `baseUrl` 为准（通过 `X-Upstream-Base-Url` 传入后端）
 - 若要启用“链接分享”（长内容），请配置 `NEON_DATABASE_URL`（或 `DATABASE_URL`）

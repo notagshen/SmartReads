@@ -86,10 +86,13 @@ const ApiSettings = () => {
                         id="baseUrl"
                         type="text"
                         className={styles.formInput}
-                        placeholder="输入API基础URL..."
+                        placeholder="输入你的上游API基础URL，如：https://axonhub.example.com/v1"
                         value={settings.baseUrl || ''}
                         onChange={(e) => handleChange('baseUrl', e.target.value)}
                     />
+                    <div className={styles.formHelp}>
+                        <small>每个用户可填自己的上游URL；前端会通过本项目后端同源中转，避免浏览器跨域</small>
+                    </div>
                 </div>
 
                 <div className={styles.formGroup}>

@@ -6,6 +6,7 @@ import { FaCog, FaTimes, FaSave } from 'react-icons/fa';
 import Button from '../common/Button/Button';
 import ApiSettings from './ApiSettings';
 import UiSettings from './UiSettings';
+import { buildApiUrl, normalizeApiBaseUrl, PROXY_API_BASE_URL } from '../../utils/apiBaseUrl';
 
 const SettingsModal = () => {
   const { isSettingsModalOpen, closeSettingsModal, saveSettings, settings, setApiConnectionStatus } = useAppContext();
@@ -24,10 +25,11 @@ const SettingsModal = () => {
     // 如果有API密钥，自动测试连接
     if (settings.apiKey && settings.baseUrl) {
       try {
-        const response = await fetch(settings.baseUrl + '/models', {
+        const response = await fetch(buildApiUrl(PROXY_API_BASE_URL, '/models'), {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${settings.apiKey}`
+            'Authorization': `Bearer ${settings.apiKey}`,
+            'X-Upstream-Base-Url': normalizeApiBaseUrl(settings.baseUrl)
           }
         });
         

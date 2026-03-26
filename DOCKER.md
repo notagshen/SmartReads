@@ -43,4 +43,5 @@ docker-compose build --no-cache
 
 - 确保端口4173未被占用
 - 首次构建可能需要几分钟时间
-- 生产环境建议配置反向代理（如Nginx）
+- 前端基础URL填写用户自己的上游地址（例如 `https://axonhub.052222.xyz/v1`）
+- 项目会通过同源 `/api/proxy` 在后端中转，避免浏览器跨域

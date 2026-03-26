@@ -49,6 +49,7 @@
 - 📋 结构化的分析结果展示
 - 📄 支持Markdown格式导出
 - 📋 一键复制功能
+- 🔗 支持分享链接（可接入 Neon 存储大内容）
 - 🔍 详细的调试信息查看
 
 ## 🚀 快速开始
@@ -80,7 +81,9 @@ docker-compose up --build
 
 # 或使用 Docker
 docker build -t smartreads-web .
-docker run -p 4173:4173 smartreads-web
+docker run -p 4173:4173 \
+  -e NEON_DATABASE_URL="postgres://user:pass@ep-xxx.neon.tech/db?sslmode=require" \
+  smartreads-web
 ```
 
 访问 http://localhost:4173 开始使用
@@ -102,6 +105,7 @@ docker run -p 4173:4173 smartreads-web
 
 - 每个用户可以填写自己的上游 `baseUrl`
 - 后端会做基础安全检查：禁止 `localhost`、私网IP 等危险上游地址
+- 可选配置 `NEON_DATABASE_URL`（或 `DATABASE_URL`）开启链接分享存储接口：`POST /api/share`、`GET /api/share/:id`
 
 ### 2. 上传小说文件
 1. 在"预处理"面板选择文件

@@ -239,13 +239,19 @@ export const AppProvider = ({ children }) => {
 
     const loadChapterFiles = (files, autoSelect = false) => {
         const formattedFiles = files.map((file, index) => ({
+            ...file,
             id: file.id || `manual_${index}_${Date.now()}`,
             name: file.name || `文件${index + 1}`,
             content: file.content || '',
             selected: autoSelect ? index < 3 : (file.selected !== undefined ? file.selected : false),
             source: file.source || 'manual_upload',
             size: (file.content || '').length,
-            chapters: (file.content || '').split('\n\n').filter(line => line.trim()).length
+            chapters: Array.isArray(file.chapterNumbers) && file.chapterNumbers.length > 0
+                ? file.chapterNumbers.length
+                : (file.content || '').split('\n\n').filter(line => line.trim()).length,
+            chapterNumbers: Array.isArray(file.chapterNumbers) ? file.chapterNumbers : [],
+            chapterStart: file.chapterStart,
+            chapterEnd: file.chapterEnd
         }));
         setChapterFiles(formattedFiles);
     };
@@ -259,16 +265,20 @@ export const AppProvider = ({ children }) => {
     };
 
     // 分析结果管理
-    const updateAnalysisResult = (fileName, content, isComplete = false, hasError = false) => {
-        setAnalysisResults(prev => ({
-            ...prev,
-            [fileName]: {
-                content: content,
-                isComplete,
-                hasError,
-                timestamp: Date.now()
-            }
-        }));
+    const updateAnalysisResult = (fileName, content, isComplete = false, hasError = false, meta = undefined) => {
+        setAnalysisResults(prev => {
+            const existing = prev[fileName] || {};
+            return ({
+                ...prev,
+                [fileName]: {
+                    content: content,
+                    isComplete,
+                    hasError,
+                    meta: meta !== undefined ? meta : (existing.meta || null),
+                    timestamp: Date.now()
+                }
+            });
+        });
     };
 
     const clearAnalysisResults = () => {

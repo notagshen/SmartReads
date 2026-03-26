@@ -11,6 +11,7 @@ import { useAnalyzer } from '../../../hooks/useAnalyzer';
 import { useCache } from '../../../contexts/CacheContext';
 import { useFileHandler } from '../../../hooks/useFileHandler';
 import { partitionQueueByResults, shouldAutoResume, createResumeLogEntry } from '../../../utils/analysisResume';
+import { extractChapterNumbersFromFileName, extractChapterNumbersFromText, uniqueNumbersInOrder } from '../../../utils/chapterNumber';
 import { FaPlus, FaTrash, FaPlay, FaStop, FaFolder, FaDatabase, FaFileUpload, FaBroom, FaChevronDown, FaChevronUp } from 'react-icons/fa';
 
 const AnalysisPanel = () => {
@@ -88,7 +89,11 @@ const AnalysisPanel = () => {
                         selected: false,
                         source: 'folder_upload',
                         size: content.length,
-                        chapters: content.split('\n\n').filter(line => line.trim()).length
+                        chapters: content.split('\n\n').filter(line => line.trim()).length,
+                        chapterNumbers: uniqueNumbersInOrder([
+                            ...extractChapterNumbersFromFileName(file.name),
+                            ...extractChapterNumbersFromText(content)
+                        ])
                     });
                 } catch (error) { console.warn(`读取文件 ${file.name} 失败:`, error); }
             }
@@ -110,7 +115,10 @@ const AnalysisPanel = () => {
             selected: true,
             source: 'cache_split',
             size: file.content.length,
-            chapters: file.content.split('\n\n').filter(line => line.trim()).length
+            chapters: file.content.split('\n\n').filter(line => line.trim()).length,
+            chapterNumbers: Array.isArray(file.chapterNumbers) ? file.chapterNumbers : [],
+            chapterStart: file.chapterStart,
+            chapterEnd: file.chapterEnd
         }));
         loadChapterFiles(formattedFiles);
         const fileInfo = cacheResult.file.name;
@@ -153,8 +161,11 @@ const AnalysisPanel = () => {
             
             // 先显示缓存结果
             if (Object.keys(cachedResults).length > 0) {
+                const queueFileByName = new Map(analysisQueue.map((item) => [item.name, item]));
                 Object.entries(cachedResults).forEach(([fileName, content]) => {
-                    updateAnalysisResult(fileName, content, true, false);
+                    const file = queueFileByName.get(fileName);
+                    const meta = file ? { expectedChapterNumbers: file.chapterNumbers || [] } : undefined;
+                    updateAnalysisResult(fileName, content, true, false, meta);
                 });
                 notifySuccess('页面缓存命中', `${Object.keys(cachedResults).length} 个文件使用页面缓存结果`);
             }
@@ -189,13 +200,13 @@ const AnalysisPanel = () => {
             };
 
             // 文件完成回调
-            const onFileComplete = (fileName, result, currentIndex, totalFiles, error) => {
+            const onFileComplete = (fileName, result, currentIndex, totalFiles, error, meta) => {
                 if (isStopping) return;
                 
                 if (error) {
                     updateAnalysisResult(fileName, `分析失败: ${error}`, true, true);
                 } else {
-                    updateAnalysisResult(fileName, result, true, false);
+                    updateAnalysisResult(fileName, result, true, false, meta);
                 }
                 
                 updateAnalysisProgress({

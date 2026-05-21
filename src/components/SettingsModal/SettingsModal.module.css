@@ -117,6 +117,45 @@
     background: var(--bg-secondary);
 }
 
+.passwordContainer {
+    max-width: 420px;
+}
+
+.passwordContent {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xl);
+}
+
+.passwordLabel {
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.passwordInput {
+    width: 100%;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    transition: all var(--transition-base) ease;
+}
+
+.passwordInput:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(103, 126, 234, 0.1), var(--shadow-md);
+}
+
+.passwordError {
+    color: var(--error-color);
+    font-size: 0.8125rem;
+}
+
 /* 移动端SettingsModal优化 */
 @media (max-width: 768px) {
     .modalContainer {
@@ -141,6 +180,10 @@
     .modalFooter {
         padding: var(--spacing-lg);
         gap: var(--spacing-sm);
+    }
+
+    .passwordContent {
+        padding: var(--spacing-lg);
     }
     
     .settingsTabs {
@@ -180,6 +223,10 @@
         padding: var(--spacing-md);
         flex-direction: column;
         gap: var(--spacing-xs);
+    }
+
+    .passwordContent {
+        padding: var(--spacing-md);
     }
     
     .modalFooter button {

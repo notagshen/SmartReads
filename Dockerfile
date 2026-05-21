@@ -16,8 +16,12 @@ COPY . .
 # 构建项目
 RUN npm run build
 
+# 生成运行时前端配置
+RUN chmod +x /app/docker-entrypoint.sh
+
 # 暴露端口
 EXPOSE 4173
 
 # 启动应用
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["npm", "run", "preview"]

@@ -365,7 +365,7 @@ const ContentPanel = () => {
 
             if (navigator.share) {
                 await navigator.share({
-                    title: 'SmartReads 分析结果',
+                    title: 'ReadUp! 分析结果',
                     text: '打开这个链接查看我的分析结果',
                     url: shareUrl
                 });

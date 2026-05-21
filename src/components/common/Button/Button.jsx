@@ -1,7 +1,7 @@
 import React from 'react';
 import styles from './Button.module.css';
 
-const Button = ({ label, onClick, variant = 'primary', icon, fullWidth = false, disabled = false }) => {
+const Button = ({ label, onClick, variant = 'primary', icon, fullWidth = false, disabled = false, type = 'button' }) => {
     const buttonClasses = `
         ${styles.btn}
         ${styles[variant]}
@@ -9,7 +9,7 @@ const Button = ({ label, onClick, variant = 'primary', icon, fullWidth = false, 
     `;
 
     return (
-        <button className={buttonClasses} onClick={onClick} disabled={disabled}>
+        <button type={type} className={buttonClasses} onClick={onClick} disabled={disabled}>
             {icon && <span className={styles.icon}>{icon}</span>}
             {label}
         </button>

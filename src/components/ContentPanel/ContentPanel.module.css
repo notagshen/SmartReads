@@ -214,6 +214,71 @@
     font-weight: 500;
 }
 
+.manualShareBar {
+    display: grid;
+    grid-template-columns: auto minmax(180px, 1fr) auto auto;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.manualShareLabel {
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.manualShareInput {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-primary);
+    padding: 8px 10px;
+    font-size: 0.8rem;
+}
+
+.manualShareInput:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(110, 68, 255, 0.18);
+}
+
+.manualShareButton,
+.manualShareIconButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--glass-border);
+    background: var(--surface);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-soft-2);
+    transition: all var(--transition-base) ease;
+}
+
+.manualShareButton {
+    border-radius: 999px;
+    padding: 8px 12px;
+    white-space: nowrap;
+}
+
+.manualShareIconButton {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+}
+
+.manualShareButton:hover,
+.manualShareIconButton:hover {
+    background: var(--brand-gradient);
+    color: var(--text-white);
+}
+
 .spinningIcon {
     animation: spin 1s linear infinite;
 }
@@ -514,7 +579,21 @@
     .simpleProgress {
         padding: var(--spacing-md);
     }
-    
+
+    .manualShareBar {
+        grid-template-columns: 1fr auto;
+        padding: var(--spacing-md);
+    }
+
+    .manualShareLabel,
+    .manualShareInput {
+        grid-column: 1 / -1;
+    }
+
+    .manualShareButton {
+        justify-self: start;
+    }
+
     .tableContainer {
         overflow-x: auto;
         margin: var(--spacing-md);

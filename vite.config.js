@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { Readable } from 'node:stream';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Pool } from 'pg';
 import { buildUpstreamTargetUrl, ensureSafeUpstreamBaseUrl } from './src/utils/upstreamProxyGuard.js';
 
@@ -15,9 +15,14 @@ const SHARE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS shared_analyses (
   id TEXT PRIMARY KEY,
   markdown TEXT NOT NULL,
+  markdown_hash TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   view_count INTEGER NOT NULL DEFAULT 0
 );
+ALTER TABLE shared_analyses ADD COLUMN IF NOT EXISTS markdown_hash TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS shared_analyses_markdown_hash_key
+  ON shared_analyses (markdown_hash)
+  WHERE markdown_hash IS NOT NULL;
 `;
 
 let sharePool = null;
@@ -75,17 +80,57 @@ const ensureShareTable = async (pool) => {
 
 const generateShareId = () => randomBytes(8).toString('base64url');
 
+const getMarkdownHash = (markdown) => (
+  createHash('sha256').update(markdown, 'utf8').digest('hex')
+);
+
+const findShareByMarkdown = async (pool, markdown, markdownHash) => {
+  const hashedResult = await pool.query(
+    `SELECT id
+     FROM shared_analyses
+     WHERE markdown_hash = $1 AND markdown = $2
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    [markdownHash, markdown]
+  );
+  if (hashedResult.rowCount === 1) return hashedResult.rows[0].id;
+
+  const legacyResult = await pool.query(
+    `SELECT id
+     FROM shared_analyses
+     WHERE markdown = $1
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    [markdown]
+  );
+  if (legacyResult.rowCount !== 1) return null;
+
+  const id = legacyResult.rows[0].id;
+  pool.query(
+    'UPDATE shared_analyses SET markdown_hash = $2 WHERE id = $1 AND markdown_hash IS NULL',
+    [id, markdownHash]
+  ).catch(() => {});
+  return id;
+};
+
 const createShare = async (pool, markdown) => {
+  const markdownHash = getMarkdownHash(markdown);
+  const existingId = await findShareByMarkdown(pool, markdown, markdownHash);
+  if (existingId) return existingId;
+
   for (let i = 0; i < 6; i += 1) {
     const id = generateShareId();
     const result = await pool.query(
-      `INSERT INTO shared_analyses (id, markdown)
-       VALUES ($1, $2)
-       ON CONFLICT (id) DO NOTHING
+      `INSERT INTO shared_analyses (id, markdown, markdown_hash)
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING
        RETURNING id`,
-      [id, markdown]
+      [id, markdown, markdownHash]
     );
     if (result.rowCount === 1) return id;
+
+    const racedId = await findShareByMarkdown(pool, markdown, markdownHash);
+    if (racedId) return racedId;
   }
   throw new Error('生成分享链接失败，请重试');
 };
@@ -100,14 +145,24 @@ const getShareById = async (pool, id) => {
 };
 
 const updateShareById = async (pool, id, markdown) => {
+  const markdownHash = getMarkdownHash(markdown);
+  const existingId = await findShareByMarkdown(pool, markdown, markdownHash);
+  if (existingId && existingId !== id) {
+    return { found: true, id: existingId, updated: false, reused: true };
+  }
+
   const result = await pool.query(
     `UPDATE shared_analyses
-     SET markdown = $2
+     SET markdown = $2,
+         markdown_hash = $3
      WHERE id = $1
      RETURNING id`,
-    [id, markdown]
+    [id, markdown, markdownHash]
   );
-  return result.rowCount === 1;
+  if (result.rowCount !== 1) {
+    return { found: false };
+  }
+  return { found: true, id, updated: true, reused: false };
 };
 
 const increaseShareViewCount = (pool, id) => {
@@ -202,12 +257,16 @@ const handleShareApiRequest = async (req, res, parsed) => {
         return true;
       }
 
-      const updated = await updateShareById(pool, id, markdown);
-      if (!updated) {
+      const updateResult = await updateShareById(pool, id, markdown);
+      if (!updateResult.found) {
         writeJson(res, 404, { error: { message: '分享内容不存在或已失效' } });
         return true;
       }
-      writeJson(res, 200, { id, updated: true });
+      writeJson(res, 200, {
+        id: updateResult.id,
+        updated: updateResult.updated,
+        reused: updateResult.reused
+      });
       return true;
     } catch (error) {
       writeJson(res, 400, { error: { message: error.message } });
@@ -314,5 +373,8 @@ const dynamicUpstreamProxyPlugin = () => {
 };
 
 export default defineConfig({
-  plugins: [react(), dynamicUpstreamProxyPlugin()]
+  plugins: [react(), dynamicUpstreamProxyPlugin()],
+  preview: {
+    allowedHosts: ['read.052222.xyz']
+  }
 });

@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useRef, useEffect, useState } from 'react'
 import styles from './ContentPanel.module.css';
 import { useOptimizedNotifications } from '../../hooks/useOptimizedNotifications';
 import { useAppContext } from '../../contexts/AppContext';
-import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt, FaEdit } from 'react-icons/fa';
+import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt, FaEdit, FaTimes } from 'react-icons/fa';
 import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable, extractChapterNumbersFromRows } from '../../utils/chapterTable';
 import { extractChapterNumbersFromFileName, uniqueNumbersInOrder } from '../../utils/chapterNumber';
 import { buildShareDisplayResults } from '../../utils/shareDisplay';
@@ -15,15 +15,44 @@ import {
     updateRemoteShareMarkdown
 } from '../../utils/shareLink';
 
+const copyTextWithFallback = async (text) => {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (_error) {
+            // 继续尝试传统复制路径，Safari 上 clipboard API 偶尔会失败或不稳定。
+        }
+    }
+
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    textArea.setSelectionRange(0, text.length);
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return copied;
+};
+
 const ContentPanel = () => {
     const { notifySuccess, notifyError } = useOptimizedNotifications();
     const { analysisResults, analysisProgress, clearAnalysisResults, updateAnalysisResult } = useAppContext();
     const importInputRef = useRef(null);
+    const shareLinkInputRef = useRef(null);
     const lastShareTokenRef = useRef('');
+    const lastCreatedShareRef = useRef({ content: '', url: '' });
     const [shareView, setShareView] = useState(null);
     const [isEditingShare, setIsEditingShare] = useState(false);
     const [editableRows, setEditableRows] = useState([]);
     const [isSavingShareEdit, setIsSavingShareEdit] = useState(false);
+    const [isSharing, setIsSharing] = useState(false);
+    const [manualShareUrl, setManualShareUrl] = useState('');
     const isShareOnlyView = Boolean(shareView);
     const canEditRemoteShare = Boolean(isShareOnlyView && shareView?.meta?.remoteShareId);
 
@@ -142,7 +171,8 @@ const ContentPanel = () => {
         try {
             setIsSavingShareEdit(true);
             const markdown = buildMarkdownTable(combinedTableData.headers, editableRows);
-            await updateRemoteShareMarkdown(remoteShareId, markdown);
+            const updatePayload = await updateRemoteShareMarkdown(remoteShareId, markdown);
+            const savedRemoteShareId = updatePayload?.id || remoteShareId;
 
             const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(editableRows));
             setShareView(prev => prev ? ({
@@ -151,13 +181,19 @@ const ContentPanel = () => {
                 meta: {
                     ...(prev.meta || {}),
                     expectedChapterNumbers: importedNumbers,
-                    remoteShareId
+                    remoteShareId: savedRemoteShareId
                 },
                 timestamp: Date.now()
             }) : prev);
 
+            if (savedRemoteShareId !== remoteShareId) {
+                const url = new URL(window.location.href);
+                url.searchParams.set('share', savedRemoteShareId);
+                window.history.replaceState(null, '', url.toString());
+            }
+
             setIsEditingShare(false);
-            notifySuccess('编辑', '已保存到当前分享链接');
+            notifySuccess('编辑', updatePayload?.reused ? '内容与已有分享相同，已切换到已有链接' : '已保存到当前分享链接');
         } catch (error) {
             notifyError('编辑', `保存失败: ${error.message}`);
         } finally {
@@ -187,16 +223,14 @@ const ContentPanel = () => {
         }
 
         try {
-            await navigator.clipboard.writeText(content);
+            const copied = await copyTextWithFallback(content);
+            if (!copied) {
+                notifyError('复制', '自动复制失败，请手动选中表格内容复制');
+                return;
+            }
             notifySuccess('复制', '表格数据已复制到剪贴板');
         } catch (error) {
-            const textArea = document.createElement('textarea');
-            textArea.value = content;
-            document.body.appendChild(textArea);
-            textArea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textArea);
-            notifySuccess('复制', '表格数据已复制到剪贴板');
+            notifyError('复制', `复制失败: ${error.message || '未知错误'}`);
         }
     };
 
@@ -262,7 +296,40 @@ const ContentPanel = () => {
         }
     };
 
+    const selectManualShareLink = useCallback(() => {
+        const input = shareLinkInputRef.current;
+        if (!input) return;
+        input.focus();
+        input.select();
+        input.setSelectionRange(0, input.value.length);
+    }, []);
+
+    const selectManualShareLinkSoon = useCallback(() => {
+        window.setTimeout(() => {
+            selectManualShareLink();
+        }, 0);
+    }, [selectManualShareLink]);
+
+    const handleCopyManualShareUrl = useCallback(async () => {
+        if (!manualShareUrl) return;
+
+        try {
+            const copied = await copyTextWithFallback(manualShareUrl);
+            if (copied) {
+                notifySuccess('复制', '分享链接已复制到剪贴板');
+                return;
+            }
+        } catch (_error) {
+            // 下面会聚焦输入框，方便用户手动复制。
+        }
+
+        selectManualShareLink();
+        notifyError('复制', '自动复制失败，请手动复制输入框中的链接');
+    }, [manualShareUrl, notifyError, notifySuccess, selectManualShareLink]);
+
     const handleShare = async () => {
+        if (isSharing) return;
+
         const content = getTableContent();
         if (!content) {
             notifyError('分享', '没有可分享的表格数据');
@@ -273,45 +340,52 @@ const ContentPanel = () => {
             return;
         }
 
-        let shareUrl = '';
+        setIsSharing(true);
         try {
-            shareUrl = await createRemoteShare(content);
-        } catch (error) {
-            try {
-                shareUrl = buildShareLink(content, window.location.href);
-                notifySuccess('分享', '分享服务不可用，已回退为本地压缩链接');
-            } catch (fallbackError) {
-                notifyError('分享', `生成分享链接失败: ${error.message}；${fallbackError.message}`);
-                return;
+            let shareUrl = '';
+            const cachedShare = lastCreatedShareRef.current;
+            if (cachedShare.content === content && cachedShare.url) {
+                shareUrl = cachedShare.url;
+            } else {
+                try {
+                    shareUrl = await createRemoteShare(content);
+                } catch (error) {
+                    try {
+                        shareUrl = buildShareLink(content, window.location.href);
+                        notifySuccess('分享', '分享服务不可用，已回退为本地压缩链接');
+                    } catch (fallbackError) {
+                        notifyError('分享', `生成分享链接失败: ${error.message}；${fallbackError.message}`);
+                        return;
+                    }
+                }
+                lastCreatedShareRef.current = { content, url: shareUrl };
             }
-        }
 
-        try {
+            setManualShareUrl(shareUrl);
+
             if (navigator.share) {
                 await navigator.share({
                     title: 'SmartReads 分析结果',
                     text: '打开这个链接查看我的分析结果',
                     url: shareUrl
                 });
-                notifySuccess('分享', '已调用系统分享');
+                notifySuccess('分享', '分享链接已生成，下方可手动复制');
                 return;
             }
 
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(shareUrl);
+            const copied = await copyTextWithFallback(shareUrl);
+            if (copied) {
+                notifySuccess('分享', '分享链接已生成，剪贴板为空时请手动复制下方链接');
             } else {
-                const textArea = document.createElement('textarea');
-                textArea.value = shareUrl;
-                document.body.appendChild(textArea);
-                textArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textArea);
+                selectManualShareLinkSoon();
+                notifyError('分享', '自动复制失败，请手动复制下方链接');
             }
-            notifySuccess('分享', '分享链接已复制到剪贴板');
         } catch (error) {
             if (error?.name !== 'AbortError') {
                 notifyError('分享', `分享失败: ${error.message || '未知错误'}`);
             }
+        } finally {
+            setIsSharing(false);
         }
     };
 
@@ -557,11 +631,11 @@ const ContentPanel = () => {
                         <button
                             className={styles.actionButton}
                             onClick={handleShare}
-                            disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit}
+                            disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit || isSharing}
                             title="分享表格数据"
                         >
-                            <FaShareAlt />
-                            分享
+                            {isSharing ? <FaSpinner className={styles.spinningIcon} /> : <FaShareAlt />}
+                            {isSharing ? '分享中' : '分享'}
                         </button>
                     )}
                     <button 
@@ -577,6 +651,39 @@ const ContentPanel = () => {
             </div>
             
             <div className={styles.resultContent}>
+                {manualShareUrl && (
+                    <div className={styles.manualShareBar}>
+                        <span className={styles.manualShareLabel}>分享链接</span>
+                        <input
+                            ref={shareLinkInputRef}
+                            className={styles.manualShareInput}
+                            value={manualShareUrl}
+                            readOnly
+                            onFocus={selectManualShareLink}
+                            onClick={selectManualShareLink}
+                            aria-label="分享链接"
+                        />
+                        <button
+                            className={styles.manualShareButton}
+                            onClick={handleCopyManualShareUrl}
+                            type="button"
+                            title="复制分享链接"
+                        >
+                            <FaCopy />
+                            复制链接
+                        </button>
+                        <button
+                            className={styles.manualShareIconButton}
+                            onClick={() => setManualShareUrl('')}
+                            type="button"
+                            title="关闭分享链接"
+                            aria-label="关闭分享链接"
+                        >
+                            <FaTimes />
+                        </button>
+                    </div>
+                )}
+
                 {/* 简化的进度信息 */}
                 {(() => {
                     const progressText = getSimpleProgressInfo();

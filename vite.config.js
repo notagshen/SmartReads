@@ -28,6 +28,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS shared_analyses_markdown_hash_key
 
 let sharePool = null;
 let shareTableReady = null;
+let lastSharePoolErrorAt = 0;
 
 const readRequestBody = async (req) => new Promise((resolve, reject) => {
   const chunks = [];
@@ -117,6 +118,13 @@ const getSharePool = () => {
     sharePool = new Pool({
       connectionString,
       ssl: { rejectUnauthorized: false }
+    });
+    sharePool.on('error', (error) => {
+      const now = Date.now();
+      if (now - lastSharePoolErrorAt > 30000) {
+        console.warn('share database idle client error:', error.message);
+        lastSharePoolErrorAt = now;
+      }
     });
   }
   return sharePool;

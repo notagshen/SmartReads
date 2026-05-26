@@ -1,10 +1,34 @@
 const runtimeConfig = typeof window === 'undefined' ? {} : (window.__SMARTREADS_CONFIG__ || {});
-const SETTINGS_PASSWORD = (
-    runtimeConfig.VITE_SETTINGS_PASSWORD ||
-    import.meta.env.VITE_SETTINGS_PASSWORD ||
-    ''
-).trim();
+const hasRuntimePasswordFlag = Object.prototype.hasOwnProperty.call(
+    runtimeConfig,
+    'SETTINGS_PASSWORD_REQUIRED'
+);
 
-export const isSettingsPasswordEnabled = () => SETTINGS_PASSWORD.length > 0;
+export const isSettingsPasswordEnabled = async () => {
+    if (hasRuntimePasswordFlag) {
+        return Boolean(runtimeConfig.SETTINGS_PASSWORD_REQUIRED);
+    }
 
-export const verifySettingsPassword = (password) => password === SETTINGS_PASSWORD;
+    try {
+        const response = await fetch('/api/settings-auth', {
+            method: 'GET',
+            cache: 'no-store'
+        });
+        if (!response.ok) return false;
+
+        const payload = await response.json();
+        return Boolean(payload.passwordRequired);
+    } catch (_error) {
+        return false;
+    }
+};
+
+export const verifySettingsPassword = async (password) => {
+    const response = await fetch('/api/settings-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+    });
+
+    return response.ok;
+};

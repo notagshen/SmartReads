@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { Readable } from 'node:stream';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Pool } from 'pg';
 import { buildUpstreamTargetUrl, ensureSafeUpstreamBaseUrl } from './src/utils/upstreamProxyGuard.js';
 
 const PROXY_PREFIX = '/api/proxy';
 const SHARE_PREFIX = '/api/share';
+const SETTINGS_AUTH_PREFIX = '/api/settings-auth';
 const FORWARDED_REQUEST_HEADERS = ['authorization', 'content-type', 'accept'];
 const FORWARDED_RESPONSE_HEADERS = ['content-type', 'cache-control'];
 const MAX_SHARE_MARKDOWN_SIZE = 2 * 1024 * 1024; // 2MB
@@ -56,6 +57,56 @@ const parseJsonBody = async (req) => {
   } catch (_error) {
     throw new Error('请求体不是合法JSON');
   }
+};
+
+const getSettingsPassword = () => (process.env.VITE_SETTINGS_PASSWORD || '').trim();
+
+const isSameSecret = (input, expected) => {
+  const inputBuffer = Buffer.from(input);
+  const expectedBuffer = Buffer.from(expected);
+  if (inputBuffer.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(inputBuffer, expectedBuffer);
+};
+
+const handleSettingsAuthRequest = async (req, res) => {
+  const method = (req.method || 'GET').toUpperCase();
+
+  if (method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.end();
+    return true;
+  }
+
+  if (method === 'GET') {
+    writeJson(res, 200, { passwordRequired: Boolean(getSettingsPassword()) });
+    return true;
+  }
+
+  if (method !== 'POST') {
+    writeJson(res, 405, { error: { message: '设置验证接口只支持 GET/POST' } });
+    return true;
+  }
+
+  const expectedPassword = getSettingsPassword();
+  if (!expectedPassword) {
+    writeJson(res, 200, { authenticated: true, passwordRequired: false });
+    return true;
+  }
+
+  try {
+    const body = await parseJsonBody(req);
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (isSameSecret(password, expectedPassword)) {
+      writeJson(res, 200, { authenticated: true, passwordRequired: true });
+      return true;
+    }
+  } catch (_error) {
+    writeJson(res, 400, { error: { message: '请求体不是合法JSON' } });
+    return true;
+  }
+
+  writeJson(res, 401, { error: { message: '密码不正确' } });
+  return true;
 };
 
 const getSharePool = () => {
@@ -282,6 +333,11 @@ const createProxyMiddleware = () => async (req, res, next) => {
   try {
     const requestUrl = req.url || '';
     const parsed = new URL(requestUrl, 'http://localhost');
+
+    if (parsed.pathname === SETTINGS_AUTH_PREFIX) {
+      await handleSettingsAuthRequest(req, res);
+      return;
+    }
 
     if (parsed.pathname.startsWith(SHARE_PREFIX)) {
       if (req.method === 'OPTIONS') {

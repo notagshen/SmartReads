@@ -1,5 +1,6 @@
 .btn {
     padding: var(--spacing-md) var(--spacing-lg);
+    min-height: 44px;
     border-radius: 999px;
     font-size: 0.875rem;
     font-weight: 600;
@@ -62,9 +63,10 @@
 /* 移动端Button优化 */
 @media (max-width: 768px) {
     .btn {
-        padding: var(--spacing-sm) var(--spacing-md);
-        font-size: 0.8125rem;
-        gap: var(--spacing-xs);
+        min-height: 44px;
+        padding: 10px 14px;
+        font-size: 0.875rem;
+        gap: 6px;
     }
     
     .btn:hover {
@@ -74,9 +76,10 @@
 
 @media (max-width: 480px) {
     .btn {
-        padding: var(--spacing-xs) var(--spacing-sm);
-        font-size: 0.75rem;
-        gap: 2px;
+        min-height: 44px;
+        padding: 10px 12px;
+        font-size: 0.875rem;
+        gap: 6px;
     }
     
     .btn:hover {

@@ -5,7 +5,7 @@ node <<'NODE'
 const fs = require('fs');
 
 const config = {
-  VITE_SETTINGS_PASSWORD: process.env.VITE_SETTINGS_PASSWORD || ''
+  SETTINGS_PASSWORD_REQUIRED: Boolean((process.env.VITE_SETTINGS_PASSWORD || '').trim())
 };
 
 fs.writeFileSync(

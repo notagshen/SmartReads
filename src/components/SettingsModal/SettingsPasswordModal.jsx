@@ -7,12 +7,14 @@ import { verifySettingsPassword } from '../../utils/settingsAccess';
 const SettingsPasswordModal = ({ isOpen, onClose, onVerified }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
   const inputRef = useRef(null);
 
   useEffect(() => {
     if (!isOpen) {
       setPassword('');
       setError('');
+      setIsVerifying(false);
       return;
     }
 
@@ -23,17 +25,24 @@ const SettingsPasswordModal = ({ isOpen, onClose, onVerified }) => {
     return null;
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
+    setIsVerifying(true);
 
-    if (verifySettingsPassword(password)) {
-      setPassword('');
-      setError('');
-      onVerified();
-      return;
+    try {
+      if (await verifySettingsPassword(password)) {
+        setPassword('');
+        setError('');
+        onVerified();
+        return;
+      }
+
+      setError('密码不正确，请重试');
+    } catch (_error) {
+      setError('验证失败，请稍后重试');
+    } finally {
+      setIsVerifying(false);
     }
-
-    setError('密码不正确，请重试');
   };
 
   return (
@@ -64,8 +73,8 @@ const SettingsPasswordModal = ({ isOpen, onClose, onVerified }) => {
         </div>
 
         <div className={styles.modalFooter}>
-          <Button label="取消" onClick={onClose} variant="secondary" />
-          <Button type="submit" label="验证" icon={<FaLock />} />
+          <Button label="取消" onClick={onClose} variant="secondary" disabled={isVerifying} />
+          <Button type="submit" label={isVerifying ? '验证中...' : '验证'} icon={<FaLock />} disabled={isVerifying} />
         </div>
       </form>
     </div>

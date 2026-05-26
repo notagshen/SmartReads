@@ -19,8 +19,8 @@ const Header = () => {
         window.location.assign(window.location.origin);
     };
 
-    const handleSettingsClick = () => {
-        if (isSettingsPasswordEnabled()) {
+    const handleSettingsClick = async () => {
+        if (await isSettingsPasswordEnabled()) {
             setIsSettingsPasswordOpen(true);
             return;
         }

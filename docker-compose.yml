@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   smartreads-web:
     image: ghcr.io/notagshen/smartreads:arm64-latest

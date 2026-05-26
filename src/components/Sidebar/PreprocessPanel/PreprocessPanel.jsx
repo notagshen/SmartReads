@@ -334,7 +334,10 @@ const PreprocessPanel = () => {
                     disabled={isProcessing}
                 >
                     <FaBook />
-                    <span>Epub转Txt</span>
+                    <span className={styles.subTabText}>
+                        <span className={styles.subTabTitle}>Epub转Txt</span>
+                        <span className={styles.subTabDesc}>把电子书转换成可拆分文本</span>
+                    </span>
                 </button>
                 <button
                     className={`${styles.subTab} ${activeTab === 'split' ? styles.active : ''}`}
@@ -342,7 +345,10 @@ const PreprocessPanel = () => {
                     disabled={isProcessing}
                 >
                     <FaCut />
-                    <span>章节拆分</span>
+                    <span className={styles.subTabText}>
+                        <span className={styles.subTabTitle}>章节拆分</span>
+                        <span className={styles.subTabDesc}>按章节分组生成分析文件</span>
+                    </span>
                 </button>
             </div>
 

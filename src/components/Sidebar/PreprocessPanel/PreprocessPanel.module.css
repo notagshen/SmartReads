@@ -8,56 +8,84 @@
 
 .subTabs {
     display: flex;
+    gap: var(--spacing-sm);
     border-bottom: 1px solid var(--glass-border);
     margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-md);
     flex-shrink: 0; /* 防止压缩 */
 }
 
 .subTab {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-md) var(--spacing-lg);
-    background: none;
-    border: none;
+    justify-content: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    min-height: 72px;
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--card-radius);
     color: var(--text-secondary);
     font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
     transition: all var(--transition-base) ease;
-    border-bottom: 2px solid transparent;
     position: relative;
     flex: 1; /* 平均分配宽度 */
     min-width: 0; /* 防止flex子项溢出 */
+    text-align: left;
+    box-shadow: var(--shadow-soft-2);
+}
+
+.subTab svg {
+    flex: 0 0 auto;
+    font-size: 1.4rem;
+}
+
+.subTabText {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.subTabTitle {
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.subTabDesc {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.35;
 }
 
 .subTab:hover:not(:disabled) {
     color: var(--text-primary);
     background: linear-gradient(135deg, rgba(110,68,255,0.06), rgba(181,108,255,0.06));
+    border-color: var(--primary-light);
+    transform: translateY(-1px);
 }
 
 .subTab.active {
-    color: var(--primary-color);
-    border-bottom-color: var(--primary-color);
-    background: linear-gradient(135deg, rgba(110,68,255,0.08), rgba(181,108,255,0.08));
+    color: var(--text-white);
+    border-color: transparent;
+    background: var(--brand-gradient);
+    box-shadow: var(--shadow-soft);
+}
+
+.subTab.active .subTabTitle,
+.subTab.active .subTabDesc {
+    color: var(--text-white);
 }
 
 .subTab:disabled {
     color: var(--text-muted);
     cursor: not-allowed;
     opacity: 0.6;
-}
-
-.subTab span {
-    transition: transform var(--transition-base) ease;
-    white-space: nowrap; /* 防止文字换行 */
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.subTab:hover:not(:disabled) span {
-    transform: translateY(-1px);
 }
 
 .subContent {
@@ -278,30 +306,28 @@
     }
     
     .subTabs {
-        flex-direction: column;
+        flex-direction: row;
+        gap: var(--spacing-sm);
+        padding-bottom: var(--spacing-sm);
     }
     
     .subTab {
-        justify-content: center;
-        border-bottom: none;
-        border-right: 2px solid transparent;
-        flex: none; /* 移动端取消flex均分 */
-        padding: var(--spacing-sm);
+        min-height: 84px;
+        padding: 12px;
     }
-    
-    .subTab.active {
-        border-bottom: none;
-        border-right-color: var(--primary-color);
+
+    .subTabTitle {
+        font-size: 0.95rem;
+    }
+
+    .subTabDesc {
+        font-size: 0.75rem;
     }
     
     .convertResult,
     .splitResult,
     .cacheInfo {
         padding: var(--spacing-md);
-    }
-    
-    .subTab span {
-        white-space: normal; /* 移动端允许文字换行 */
     }
     
     .progressSection {

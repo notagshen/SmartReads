@@ -59,6 +59,7 @@ const PreprocessPanel = () => {
     } = useFileHandler();
 
     const chapterGroupOptions = [
+        { value: '1', label: '1章/组' },
         { value: '5', label: '5章/组' },
         { value: '10', label: '10章/组' },
         { value: '20', label: '20章/组' },

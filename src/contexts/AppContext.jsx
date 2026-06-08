@@ -1,7 +1,11 @@
 import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import { useCache } from './CacheContext';
 import { saveJSON, loadJSON, clearNamespace } from '../utils/storage';
-import { DEFAULT_UPSTREAM_BASE_URL } from '../utils/apiBaseUrl';
+import {
+    DEFAULT_SETTINGS,
+    loadPersistedSettings,
+    savePersistedSettings
+} from '../utils/settingsPersistence';
 
 const AppContext = createContext();
 const ANALYSIS_RUNTIME_KEY = 'analysis-runtime';
@@ -20,14 +24,7 @@ export const AppProvider = ({ children }) => {
     const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
     const [chapterFiles, setChapterFiles] = useState([]);
     const [analysisQueue, setAnalysisQueue] = useState([]);
-    const [settings, setSettings] = useState({
-        apiKey: '',
-        baseUrl: DEFAULT_UPSTREAM_BASE_URL,
-        model: 'gpt-3.5-turbo',
-        temperature: 0.7,
-        maxTokens: 4000,
-        truncationThresholdChars: 120000
-    });
+    const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
     // API连接状态管理
     const [apiConnectionStatus, setApiConnectionStatus] = useState({
@@ -49,19 +46,13 @@ export const AppProvider = ({ children }) => {
 
     // 初始化：从本地存储加载settings与theme
     useEffect(() => {
-        const persisted = loadJSON('settings', null, { version: 'v1' });
-        if (persisted && typeof persisted === 'object') {
-            setSettings(prev => ({ ...prev, ...persisted }));
-            if (persisted.theme) {
-                setTheme(persisted.theme);
-                document.body.setAttribute('data-theme', persisted.theme);
-            }
-        } else {
-            const savedTheme = localStorage.getItem('theme');
-            if (savedTheme) {
-                setTheme(savedTheme);
-                document.body.setAttribute('data-theme', savedTheme);
-            }
+        const persisted = loadPersistedSettings();
+        setSettings(persisted.settings);
+
+        const savedTheme = persisted.theme || localStorage.getItem('theme');
+        if (savedTheme) {
+            setTheme(savedTheme);
+            document.body.setAttribute('data-theme', savedTheme);
         }
     }, []);
 
@@ -91,8 +82,7 @@ export const AppProvider = ({ children }) => {
         if (!hydratedRef.current) return; // 避免首帧写入
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
-            const payload = { ...settings, theme };
-            saveJSON('settings', payload, { version: 'v1' });
+            savePersistedSettings(settings, theme);
         }, 250);
         return () => saveTimer.current && clearTimeout(saveTimer.current);
     }, [settings, theme]);
@@ -168,6 +158,7 @@ export const AppProvider = ({ children }) => {
             clearCacheContext();
             setChapterFiles([]);
             setAnalysisQueue([]);
+            savePersistedSettings(settings, theme);
         } catch (e) {
             // 忽略错误，尽量清理
             console.warn('clearClientCache error:', e);
@@ -191,7 +182,7 @@ export const AppProvider = ({ children }) => {
 
     // 保存设置（立即保存并关闭）
     const saveSettings = () => {
-        saveJSON('settings', { ...settings, theme }, { version: 'v1' });
+        savePersistedSettings(settings, theme);
         closeSettingsModal();
         return true;
     };

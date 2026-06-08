@@ -302,6 +302,34 @@
     font-weight: 500;
 }
 
+.continuityWarning {
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.continuityWarningText {
+    min-width: 220px;
+    flex: 1;
+}
+
+.ignoreContinuityLabel {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ignoreContinuityLabel input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary-color);
+}
+
 .manualShareBar {
     display: grid;
     grid-template-columns: auto minmax(180px, 1fr) auto auto;
@@ -666,6 +694,10 @@
     
     .simpleProgress {
         padding: var(--spacing-md);
+    }
+
+    .ignoreContinuityLabel {
+        white-space: normal;
     }
 
     .manualShareBar {

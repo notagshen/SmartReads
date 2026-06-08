@@ -55,6 +55,7 @@ const ContentPanel = () => {
     const [isSavingShareEdit, setIsSavingShareEdit] = useState(false);
     const [isSharing, setIsSharing] = useState(false);
     const [isImportModeDialogOpen, setIsImportModeDialogOpen] = useState(false);
+    const [ignoreContinuityError, setIgnoreContinuityError] = useState(false);
     const [manualShareUrl, setManualShareUrl] = useState('');
     const isShareOnlyView = Boolean(shareView);
     const canEditRemoteShare = Boolean(isShareOnlyView && shareView?.meta?.remoteShareId);
@@ -129,6 +130,18 @@ const ContentPanel = () => {
             expectedChapterNumbers
         };
     }, [displayAnalysisResults]);
+
+    const hasTableData = combinedTableData.headers.length > 0 && combinedTableData.rows.length > 0;
+    const hasContinuityError = hasTableData && !combinedTableData.continuity?.isValid;
+    const blocksContinuityActions = hasContinuityError && !ignoreContinuityError;
+
+    useEffect(() => {
+        setIgnoreContinuityError(false);
+    }, [
+        combinedTableData.continuity?.actualNumbers.join(','),
+        combinedTableData.continuity?.expectedNumbers.join(','),
+        combinedTableData.continuity?.isValid
+    ]);
 
     // 获取表格数据用于复制和导出
     const getTableContent = useCallback(() => {
@@ -220,8 +233,8 @@ const ContentPanel = () => {
             notifyError('复制', '没有可复制的表格数据');
             return;
         }
-        if (!combinedTableData.continuity?.isValid) {
-            notifyError('复制', '章节存在缺失/重复/错位，请先重新分析不连续分段');
+        if (blocksContinuityActions) {
+            notifyError('复制', '章节存在缺失/重复/错位，请先确认是否忽略该错误');
             return;
         }
 
@@ -243,8 +256,8 @@ const ContentPanel = () => {
             notifyError('导出', '没有可导出的表格数据');
             return;
         }
-        if (!combinedTableData.continuity?.isValid) {
-            notifyError('导出', '章节存在缺失/重复/错位，请先重新分析不连续分段');
+        if (blocksContinuityActions) {
+            notifyError('导出', '章节存在缺失/重复/错位，请先确认是否忽略该错误');
             return;
         }
 
@@ -363,8 +376,8 @@ const ContentPanel = () => {
             notifyError('分享', '没有可分享的表格数据');
             return;
         }
-        if (!combinedTableData.continuity?.isValid) {
-            notifyError('分享', '章节存在缺失/重复/错位，请先修复后再分享');
+        if (blocksContinuityActions) {
+            notifyError('分享', '章节存在缺失/重复/错位，请先确认是否忽略该错误');
             return;
         }
 
@@ -638,7 +651,7 @@ const ContentPanel = () => {
                     <button 
                         className={styles.actionButton}
                         onClick={handleCopy}
-                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit}
+                        disabled={combinedTableData.headers.length === 0 || blocksContinuityActions || isSavingShareEdit}
                         title="复制表格数据"
                     >
                         <FaCopy />
@@ -659,7 +672,7 @@ const ContentPanel = () => {
                         <button
                             className={styles.actionButton}
                             onClick={handleShare}
-                            disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit || isSharing}
+                            disabled={combinedTableData.headers.length === 0 || blocksContinuityActions || isSavingShareEdit || isSharing}
                             title="分享表格数据"
                         >
                             {isSharing ? <FaSpinner className={styles.spinningIcon} /> : <FaShareAlt />}
@@ -669,7 +682,7 @@ const ContentPanel = () => {
                     <button 
                         className={styles.actionButton}
                         onClick={handleExport}
-                        disabled={combinedTableData.headers.length === 0 || !combinedTableData.continuity?.isValid || isSavingShareEdit}
+                        disabled={combinedTableData.headers.length === 0 || blocksContinuityActions || isSavingShareEdit}
                         title="导出表格数据"
                     >
                         <FaDownload />
@@ -767,15 +780,23 @@ const ContentPanel = () => {
                     );
                 })()}
 
-                {!analysisProgress.isAnalyzing && !isEditingShare && combinedTableData.rows.length > 0 && !combinedTableData.continuity?.isValid && (
-                    <div className={styles.simpleProgress}>
-                        <span>
+                {!analysisProgress.isAnalyzing && !isEditingShare && hasContinuityError && (
+                    <div className={`${styles.simpleProgress} ${styles.continuityWarning}`}>
+                        <span className={styles.continuityWarningText}>
                             章节连续性校验未通过：
                             {combinedTableData.continuity?.missing?.length > 0 ? ` 缺失 ${combinedTableData.continuity.missing.join(', ')}` : ''}
                             {combinedTableData.continuity?.duplicates?.length > 0 ? ` 重复 ${combinedTableData.continuity.duplicates.join(', ')}` : ''}
                             {combinedTableData.continuity?.unexpected?.length > 0 ? ` 越界 ${combinedTableData.continuity.unexpected.join(', ')}` : ''}
                             {combinedTableData.continuity?.orderMismatch ? ' 顺序错位' : ''}
                         </span>
+                        <label className={styles.ignoreContinuityLabel}>
+                            <input
+                                type="checkbox"
+                                checked={ignoreContinuityError}
+                                onChange={(event) => setIgnoreContinuityError(event.target.checked)}
+                            />
+                            <span>忽略此错误，允许复制/导出/分享</span>
+                        </label>
                     </div>
                 )}
                 

@@ -6,6 +6,7 @@ import { FaCopy, FaDownload, FaTable, FaSpinner, FaUpload, FaShareAlt, FaEdit, F
 import { parseMarkdownTable, validateChapterContinuity, buildMarkdownTable, extractChapterNumbersFromRows } from '../../utils/chapterTable';
 import { extractChapterNumbersFromFileName, uniqueNumbersInOrder } from '../../utils/chapterNumber';
 import { buildShareDisplayResults } from '../../utils/shareDisplay';
+import { IMPORT_MODES, getImportResultFileName } from '../../utils/importMode';
 import {
     buildShareLink,
     parseShareLink,
@@ -47,11 +48,13 @@ const ContentPanel = () => {
     const shareLinkInputRef = useRef(null);
     const lastShareTokenRef = useRef('');
     const lastCreatedShareRef = useRef({ content: '', url: '' });
+    const pendingImportModeRef = useRef(IMPORT_MODES.OVERWRITE);
     const [shareView, setShareView] = useState(null);
     const [isEditingShare, setIsEditingShare] = useState(false);
     const [editableRows, setEditableRows] = useState([]);
     const [isSavingShareEdit, setIsSavingShareEdit] = useState(false);
     const [isSharing, setIsSharing] = useState(false);
+    const [isImportModeDialogOpen, setIsImportModeDialogOpen] = useState(false);
     const [manualShareUrl, setManualShareUrl] = useState('');
     const isShareOnlyView = Boolean(shareView);
     const canEditRemoteShare = Boolean(isShareOnlyView && shareView?.meta?.remoteShareId);
@@ -264,7 +267,15 @@ const ContentPanel = () => {
     };
 
     const handleImportClick = () => {
-        importInputRef.current?.click();
+        setIsImportModeDialogOpen(true);
+    };
+
+    const handleImportModeSelect = (mode) => {
+        pendingImportModeRef.current = mode;
+        setIsImportModeDialogOpen(false);
+        window.setTimeout(() => {
+            importInputRef.current?.click();
+        }, 0);
     };
 
     const handleImportFile = async (event) => {
@@ -272,6 +283,7 @@ const ContentPanel = () => {
         if (!file) return;
 
         try {
+            const importMode = pendingImportModeRef.current;
             const text = await file.text();
             const { headers, rows } = parseMarkdownTable(text);
             if (headers.length === 0 || rows.length === 0) {
@@ -279,19 +291,35 @@ const ContentPanel = () => {
             }
 
             const importedNumbers = uniqueNumbersInOrder(extractChapterNumbersFromRows(rows));
-            clearAnalysisResults();
+            if (importMode === IMPORT_MODES.OVERWRITE) {
+                clearAnalysisResults();
+            }
+
+            const resultFileName = getImportResultFileName(
+                analysisResults,
+                file.name,
+                importMode,
+                Date.now()
+            );
+
             updateAnalysisResult(
-                file.name || `导入结果_${Date.now()}.md`,
+                resultFileName,
                 text,
                 true,
                 false,
                 { expectedChapterNumbers: importedNumbers, imported: true }
             );
 
-            notifySuccess('导入', `已导入 ${file.name}（${rows.length} 行）`);
+            notifySuccess(
+                '导入',
+                importMode === IMPORT_MODES.OVERWRITE
+                    ? `已覆盖导入 ${file.name}（${rows.length} 行）`
+                    : `已新增导入 ${resultFileName}（${rows.length} 行）`
+            );
         } catch (error) {
             notifyError('导入', `导入失败: ${error.message}`);
         } finally {
+            pendingImportModeRef.current = IMPORT_MODES.OVERWRITE;
             event.target.value = '';
         }
     };
@@ -649,7 +677,49 @@ const ContentPanel = () => {
                     </button>
                 </div>
             </div>
-            
+
+            {isImportModeDialogOpen && (
+                <div className={styles.importDialogOverlay} onClick={() => setIsImportModeDialogOpen(false)}>
+                    <div
+                        className={styles.importDialog}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="import-mode-title"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div className={styles.importDialogHeader}>
+                            <h3 id="import-mode-title">导入方式</h3>
+                            <button
+                                type="button"
+                                className={styles.importDialogClose}
+                                onClick={() => setIsImportModeDialogOpen(false)}
+                                title="取消导入"
+                                aria-label="取消导入"
+                            >
+                                <FaTimes />
+                            </button>
+                        </div>
+                        <p className={styles.importDialogText}>选择导入后的处理方式。</p>
+                        <div className={styles.importDialogActions}>
+                            <button
+                                type="button"
+                                className={`${styles.importModeButton} ${styles.importModeDanger}`}
+                                onClick={() => handleImportModeSelect(IMPORT_MODES.OVERWRITE)}
+                            >
+                                覆盖现有结果
+                            </button>
+                            <button
+                                type="button"
+                                className={`${styles.importModeButton} ${styles.importModePrimary}`}
+                                onClick={() => handleImportModeSelect(IMPORT_MODES.APPEND)}
+                            >
+                                新增到当前结果
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className={styles.resultContent}>
                 {manualShareUrl && (
                     <div className={styles.manualShareBar}>

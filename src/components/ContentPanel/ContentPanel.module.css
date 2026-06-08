@@ -133,6 +133,93 @@
     opacity: 0.75;
 }
 
+.importDialogOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg);
+    background: rgba(15, 23, 42, 0.48);
+    backdrop-filter: blur(8px);
+}
+
+.importDialog {
+    width: min(420px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+    padding: var(--spacing-lg);
+    color: var(--text-primary);
+}
+
+.importDialogHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+}
+
+.importDialogHeader h3 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 700;
+}
+
+.importDialogClose {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--glass-border);
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--text-primary);
+}
+
+.importDialogClose:hover {
+    background: var(--bg-hover);
+}
+
+.importDialogText {
+    margin: var(--spacing-md) 0 var(--spacing-lg);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.importDialogActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-md);
+}
+
+.importModeButton {
+    min-height: 42px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    font-weight: 700;
+    transition: all var(--transition-base) ease;
+}
+
+.importModeDanger {
+    background: var(--surface);
+    color: var(--text-primary);
+}
+
+.importModePrimary {
+    background: var(--brand-gradient);
+    color: var(--text-white);
+}
+
+.importModeButton:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-soft-2);
+}
+
 /* 卡头图标渐变填充 */
 .panelHeader h2 svg {
     background: var(--text-gradient-primary);
@@ -593,6 +680,10 @@
 
     .manualShareButton {
         justify-self: start;
+    }
+
+    .importDialogActions {
+        grid-template-columns: 1fr;
     }
 
     .tableContainer {

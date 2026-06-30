@@ -25,6 +25,12 @@ const toInteger = (value) => {
     return Number.isInteger(num) && num > 0 ? num : null;
 };
 
+const CHAPTER_NUMERAL = '0-9一二三四五六七八九十百千万零两〇';
+const SECTION_TITLE_BOUNDARY = String.raw`(?=$|[\s:：、，,。.！!？?\-—《（(【\[])`;
+const CHAPTER_HEADING_SOURCE =
+    String.raw`(^\s*(?:第\s*[${CHAPTER_NUMERAL}]+\s*(?:[章回卷篇]|节${SECTION_TITLE_BOUNDARY})|(?:Chapter|CHAPTER)\s*\d+|序章|楔子|尾声|后记|番外)[^\n]*\n)`;
+
+export const createChapterHeadingPattern = () => new RegExp(CHAPTER_HEADING_SOURCE, 'gm');
 export const chineseNumeralToInt = (input = '') => {
     const text = String(input).trim();
     if (!text) return null;
@@ -75,12 +81,12 @@ export const extractChapterNumberFromTitle = (title = '') => {
     const text = String(title).trim();
     if (!text) return null;
 
-    let match = text.match(/第\s*([0-9]+)\s*[章回节卷篇]/i);
+    let match = text.match(/第\s*([0-9]+)\s*(?:[章回卷篇]|节(?=$|[\s:：、，,。.！!？?\-—《（(【\[]))/i);
     if (match) {
         return toInteger(match[1]);
     }
 
-    match = text.match(/第\s*([一二三四五六七八九十百千万零两〇]+)\s*[章回节卷篇]/);
+    match = text.match(/第\s*([一二三四五六七八九十百千万零两〇]+)\s*(?:[章回卷篇]|节(?=$|[\s:：、，,。.！!？?\-—《（(【\[]))/);
     if (match) {
         return chineseNumeralToInt(match[1]);
     }

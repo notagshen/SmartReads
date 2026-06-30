@@ -1,4 +1,4 @@
-import { resolveExpectedChapterNumbers } from './chapterNumber.js';
+import { createChapterHeadingPattern, resolveExpectedChapterNumbers } from './chapterNumber.js';
 import {
     parseMarkdownTable,
     buildMarkdownTable,
@@ -12,7 +12,7 @@ import {
 } from './truncationPolicy.js';
 
 export const buildChapterBalancedExcerpt = (content, targetLength) => {
-    const headingPattern = /(^\s*(?:第\s*[0-9一二三四五六七八九十百千零]+\s*[章回节卷篇]|(?:Chapter|CHAPTER)\s*\d+|序章|楔子|尾声|后记|番外)[^\n]*\n)/gm;
+    const headingPattern = createChapterHeadingPattern();
     const parts = String(content).split(headingPattern);
 
     if (parts.length <= 1) {

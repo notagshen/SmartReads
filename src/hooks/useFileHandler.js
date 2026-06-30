@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useNotification } from '../contexts/NotificationContext';
 import { useEpubParser } from './useEpubParser';
 import JSZip from 'jszip';
-import { extractChapterNumberFromTitle, uniqueNumbersInOrder } from '../utils/chapterNumber';
+import { createChapterHeadingPattern, extractChapterNumberFromTitle, uniqueNumbersInOrder } from '../utils/chapterNumber';
 import { openFileInput } from '../utils/browserFileInput';
 
 /**
@@ -188,7 +188,7 @@ export const useFileHandler = () => {
             // 1) 只把出现在“行首”的章节标题识别为有效标题；
             // 2) 标题行允许带后缀文字（直到换行）；
             // 3) 使用捕获组进行 split，得到 [前言, 标题1, 内容1, 标题2, 内容2, ...]
-            const headingPattern = /(^\s*(?:第\s*[0-9一二三四五六七八九十百千零]+\s*[章回节卷篇]|(?:Chapter|CHAPTER)\s*\d+|序章|楔子|尾声|后记|番外)[^\n]*\n)/gm;
+            const headingPattern = createChapterHeadingPattern();
             const parts = text.split(headingPattern);
 
             const chapters = [];

@@ -4,6 +4,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { useEpubParser } from './useEpubParser';
 import JSZip from 'jszip';
 import { extractChapterNumberFromTitle, uniqueNumbersInOrder } from '../utils/chapterNumber';
+import { openFileInput } from '../utils/browserFileInput';
 
 /**
  * 自定义Hook，用于处理文件选择、读取、解析和下载等操作。
@@ -22,38 +23,7 @@ export const useFileHandler = () => {
 
     // 创建文件输入元素
     const createFileInput = useCallback((accept, multiple = false, directory = false) => {
-        return new Promise((resolve, reject) => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = accept;
-            input.multiple = multiple;
-
-            // 如果是文件夹选择
-            if (directory) {
-                input.webkitdirectory = true;
-                input.directory = true;
-            }
-
-            input.onchange = (event) => {
-                const files = Array.from(event.target.files);
-                if (files.length > 0) {
-                    resolve(multiple || directory ? files : files[0]);
-                } else {
-                    reject(new Error('用户取消选择'));
-                }
-            };
-
-            input.onclick = () => {
-                // 每次点击时重置value，确保可以选择相同文件
-                input.value = null;
-            };
-
-            input.onerror = (error) => {
-                reject(new Error('文件选择错误: ' + error.message));
-            };
-
-            input.click();
-        });
+        return openFileInput({ accept, multiple, directory });
     }, []);
 
     // 选择单个文件

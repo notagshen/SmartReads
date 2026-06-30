@@ -4,6 +4,10 @@ import { Readable } from 'node:stream';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Pool } from 'pg';
 import { buildUpstreamTargetUrl, ensureSafeUpstreamBaseUrl } from './src/utils/upstreamProxyGuard.js';
+import {
+  handleAnalysisBatchRequest,
+  isAnalysisBatchPath
+} from './src/server/analysisBatchService.js';
 
 const PROXY_PREFIX = '/api/proxy';
 const SHARE_PREFIX = '/api/share';
@@ -354,6 +358,26 @@ const createProxyMiddleware = () => async (req, res, next) => {
         return;
       }
       await handleShareApiRequest(req, res, parsed);
+      return;
+    }
+
+    if (isAnalysisBatchPath(parsed.pathname)) {
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+      try {
+        const body = req.method === 'POST' ? await parseJsonBody(req) : null;
+        const result = await handleAnalysisBatchRequest({
+          method: (req.method || 'GET').toUpperCase(),
+          pathname: parsed.pathname,
+          body
+        });
+        writeJson(res, result.statusCode, result.payload);
+      } catch (error) {
+        writeJson(res, 400, { error: { message: error.message } });
+      }
       return;
     }
 

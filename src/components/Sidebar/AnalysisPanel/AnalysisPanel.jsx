@@ -7,10 +7,10 @@ import Button from '../../common/Button/Button';
 import ProgressBar from '../../common/ProgressBar/ProgressBar';
 import { useAppContext } from '../../../contexts/AppContext';
 import { useOptimizedNotifications } from '../../../hooks/useOptimizedNotifications';
-import { useAnalyzer } from '../../../hooks/useAnalyzer';
+import { useBackendAnalysisBatch } from '../../../hooks/useBackendAnalysisBatch';
 import { useCache } from '../../../contexts/CacheContext';
 import { useFileHandler } from '../../../hooks/useFileHandler';
-import { partitionQueueByResults, shouldAutoResume, createResumeLogEntry } from '../../../utils/analysisResume';
+import { shouldAutoResume, createResumeLogEntry } from '../../../utils/analysisResume';
 import { extractChapterNumbersFromFileName, extractChapterNumbersFromText, uniqueNumbersInOrder } from '../../../utils/chapterNumber';
 import { FaPlus, FaTrash, FaPlay, FaStop, FaFolder, FaDatabase, FaFileUpload, FaBroom, FaChevronDown, FaChevronUp } from 'react-icons/fa';
 
@@ -24,27 +24,27 @@ const AnalysisPanel = () => {
         analysisResults,
         analysisProgress,
         shouldResumeAnalysis,
-        updateAnalysisResult,
         clearAnalysisResults,
-        updateAnalysisProgress,
-        startAnalysis,
-        completeAnalysis,
         markResumeHandled
     } = useAppContext();
-    const { 
-        notifyAnalysisProgress,
+    const {
         notifySuccess,
         notifyError,
         notifyWarning
     } = useOptimizedNotifications();
     
-    const { isAnalyzing, analyzeMultipleFiles } = useAnalyzer();
+    const {
+        isPolling,
+        hasSavedBatch,
+        startBackendAnalysis,
+        resumeBackendAnalysis,
+        cancelBackendAnalysis
+    } = useBackendAnalysisBatch();
     const { getAllCachedSplitResults } = useCache();
     const { selectFolder, readTextFile } = useFileHandler();
     
     const [folderPath, setFolderPath] = useState('');
     const [activeCacheKey, setActiveCacheKey] = useState('');
-    const [isStopping, setIsStopping] = useState(false);
     const [resumeLogs, setResumeLogs] = useState([]);
     const resumePromptLoggedRef = useRef(false);
     
@@ -56,7 +56,7 @@ const AnalysisPanel = () => {
     
     const availableCacheResults = getAllCachedSplitResults();
     const hasAvailableCache = availableCacheResults.length > 0;
-    const canResumeCurrentQueue = shouldAutoResume(shouldResumeAnalysis, analysisQueue);
+    const canResumeCurrentQueue = hasSavedBatch || shouldAutoResume(shouldResumeAnalysis, analysisQueue);
 
     useEffect(() => {
         if (hasAvailableCache && dataSource === 'folder') setDataSource('cache');
@@ -145,119 +145,21 @@ const AnalysisPanel = () => {
     };
 
     const handleStartAnalysis = useCallback(async () => {
-        if (analysisQueue.length === 0) { 
-            notifyWarning('分析队列为空，请先添加文件到分析队列'); 
-            return; 
-        }
-        
         try {
-            setIsStopping(false);
-
-            // 仅在“刷新后续跑”场景复用快照；普通手动开始不复用旧结果
-            const reuseSnapshot = shouldResumeAnalysis;
-            const sourceResults = reuseSnapshot ? analysisResults : {};
-            const { cachedResults, filesToAnalyze } = partitionQueueByResults(analysisQueue, sourceResults);
-
-            // 每次开始分析先清理旧结果，避免历史批次混入导致章节重复/错位
-            clearAnalysisResults();
-
-            // 开始分析流程
-            startAnalysis(analysisQueue.length);
-            
-            // 先显示缓存结果
-            if (reuseSnapshot && Object.keys(cachedResults).length > 0) {
-                const queueFileByName = new Map(analysisQueue.map((item) => [item.name, item]));
-                Object.entries(cachedResults).forEach(([fileName, content]) => {
-                    const file = queueFileByName.get(fileName);
-                    const meta = file ? { expectedChapterNumbers: file.chapterNumbers || [] } : undefined;
-                    updateAnalysisResult(fileName, content, true, false, meta);
-                });
-                notifySuccess('页面缓存命中', `${Object.keys(cachedResults).length} 个文件使用页面缓存结果`);
-            }
-
-            // 如果所有文件都有缓存，直接完成
-            if (reuseSnapshot && filesToAnalyze.length === 0) {
-                completeAnalysis();
-                notifySuccess('分析完成', '所有结果均来自页面缓存');
-                return;
-            }
-
-            // 分析进度回调
-            const onProgress = (progressData) => {
-                if (isStopping) return;
-                
-                if (progressData.status === 'analyzing') {
-                    updateAnalysisProgress({
-                        currentFile: progressData.fileName,
-                        progress: (progressData.fileIndex / progressData.totalFiles) * 100,
-                        completedFiles: progressData.fileIndex
-                    });
-                    notifyAnalysisProgress(progressData.fileIndex + 1, progressData.totalFiles, progressData.fileName);
-                } else if (progressData.status === 'streaming' && progressData.data) {
-                    const fileName = progressData.fileName;
-                    if (progressData.data.text) {
-                        // 实时更新流式内容
-                        const currentResult = analysisResults[fileName];
-                        const newContent = (currentResult?.content || '') + progressData.data.text;
-                        updateAnalysisResult(fileName, newContent, false, false);
-                    }
-                }
-            };
-
-            // 文件完成回调
-            const onFileComplete = (fileName, result, currentIndex, totalFiles, error, meta) => {
-                if (isStopping) return;
-                
-                if (error) {
-                    updateAnalysisResult(fileName, `分析失败: ${error}`, true, true);
-                } else {
-                    updateAnalysisResult(fileName, result, true, false, meta);
-                }
-                
-                updateAnalysisProgress({
-                    completedFiles: currentIndex,
-                    progress: (currentIndex / totalFiles) * 100
-                });
-            };
-
-            // 执行分析
-            await analyzeMultipleFiles(filesToAnalyze, onProgress, onFileComplete);
-            
-            if (!isStopping) {
-                completeAnalysis();
-                notifySuccess('分析完成', `成功分析 ${filesToAnalyze.length} 个文件`);
-            }
+            await startBackendAnalysis(analysisQueue);
         } catch (error) {
-            updateAnalysisProgress({
-                isAnalyzing: false,
-                progress: 0,
-                currentFile: ''
-            });
             notifyError('分析', error.message);
         }
-    }, [
-        analysisQueue,
-        analysisResults,
-        shouldResumeAnalysis,
-        clearAnalysisResults,
-        startAnalysis,
-        completeAnalysis,
-        updateAnalysisProgress,
-        updateAnalysisResult,
-        analyzeMultipleFiles,
-        isStopping,
-        notifyWarning,
-        notifySuccess,
-        notifyError,
-        notifyAnalysisProgress
-    ]);
+    }, [analysisQueue, startBackendAnalysis, notifyError]);
 
-    const handleStop = () => {
+    const handleStop = useCallback(async () => {
         if (!analysisProgress.isAnalyzing) return;
-        setIsStopping(true);
-        updateAnalysisProgress({ isAnalyzing: false });
-        notifyWarning('分析已请求停止');
-    };
+        try {
+            await cancelBackendAnalysis();
+        } catch (error) {
+            notifyError('取消分析', error.message);
+        }
+    }, [analysisProgress.isAnalyzing, cancelBackendAnalysis, notifyError]);
 
     // 刷新后出现续跑提示，不自动执行，交给用户确认
     useEffect(() => {
@@ -280,6 +182,7 @@ const AnalysisPanel = () => {
     }, [
         shouldResumeAnalysis,
         canResumeCurrentQueue,
+        hasSavedBatch,
         analysisQueue.length,
         appendResumeLog,
         markResumeHandled,
@@ -287,18 +190,18 @@ const AnalysisPanel = () => {
     ]);
 
     const handleResumeNow = useCallback(async () => {
-        if (analysisProgress.isAnalyzing || isAnalyzing) {
+        if (analysisProgress.isAnalyzing || isPolling) {
             return;
         }
         markResumeHandled();
         appendResumeLog('resume-started', '已确认继续未完成任务');
-        await handleStartAnalysis();
+        await resumeBackendAnalysis();
     }, [
         analysisProgress.isAnalyzing,
-        isAnalyzing,
+        isPolling,
         markResumeHandled,
         appendResumeLog,
-        handleStartAnalysis
+        resumeBackendAnalysis
     ]);
 
     const handleResumeDismiss = useCallback(() => {
@@ -455,7 +358,7 @@ const AnalysisPanel = () => {
                                     <p>调试信息将显示：</p>
                                     <ul>
                                         <li>• 模型的原始输出内容</li>
-                                        <li>• 分析过程中的实时流式数据</li>
+                                        <li>• 后端任务轮询返回的文件状态</li>
                                         <li>• 每个文件的处理状态和结果</li>
                                     </ul>
                                 </div>
@@ -469,3 +372,5 @@ const AnalysisPanel = () => {
 };
 
 export default AnalysisPanel; 
+
+

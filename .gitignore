@@ -23,5 +23,6 @@ pnpm-debug.log*
 Thumbs.db
 
 # CodeBuddy temporary files
-.codebuddy/ 
+.codebuddy/
 .ace-tool/
+/tests

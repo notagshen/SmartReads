@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { buildUpstreamTargetUrl, ensureSafeUpstreamBaseUrl } from '../utils/upstreamProxyGuard.js';
-import { buildChatCompletionRequestBody, extractCompletionTextFromJson } from '../utils/chatApiCompat.js';
+import { buildChatCompletionRequestBody } from '../utils/chatApiCompat.js';
+import { parseUpstreamPayload, readUpstreamText } from './upstreamStreamReader.js';
+import { publishBatchState, subscribeBatchState } from './batchSseHub.js';
 import {
     createAnalysisPrompt,
     normalizeAndValidateAnalysisResult,
@@ -15,8 +17,7 @@ const ACTIVE_STATUSES = new Set(['RUNNING', 'CANCELLING']);
 const TERMINAL_STATUSES = new Set(['SUCCESS', 'FAILED', 'CANCELLED']);
 const batches = new Map();
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const createBatchId = () => randomBytes(12).toString('base64url');
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)); const createBatchId = () => randomBytes(12).toString('base64url');
 
 const cloneState = (state) => ({
     id: state.id,
@@ -59,23 +60,14 @@ const assertNotCancelled = (state) => {
     }
 };
 
-const parseUpstreamPayload = async (response) => {
-    const rawText = await response.text().catch(() => '');
-    if (!rawText) return null;
-    try {
-        return JSON.parse(rawText);
-    } catch (_error) {
-        return rawText;
-    }
-};
 
-const callUpstreamAnalysis = async ({ settings, upstreamBaseUrl, content, expectedNumbers, signal }) => {
+const callUpstreamAnalysis = async ({ settings, upstreamBaseUrl, content, expectedNumbers, signal, onText }) => {
     const requestBody = buildChatCompletionRequestBody({
         model: settings.model,
         prompt: createAnalysisPrompt(content, expectedNumbers),
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
-        stream: false
+        stream: true
     });
 
     const targetUrl = buildUpstreamTargetUrl(upstreamBaseUrl, '/chat/completions', '');
@@ -89,19 +81,19 @@ const callUpstreamAnalysis = async ({ settings, upstreamBaseUrl, content, expect
         signal
     });
 
-    const payload = await parseUpstreamPayload(response);
     if (!response.ok) {
+        const payload = await parseUpstreamPayload(response);
         throw new Error(`API调用失败: ${parseErrorMessage(response.status, response.statusText, payload)}`);
     }
 
-    const text = extractCompletionTextFromJson(payload);
+    const text = await readUpstreamText(response, onText);
     if (!text) {
         throw new Error('API返回成功，但响应中缺少可用文本（message.content/reasoning_content）');
     }
     return text;
 };
 
-const analyzeFile = async (file, settings, upstreamBaseUrl, state) => {
+const analyzeFile = async (file, settings, upstreamBaseUrl, state, onText) => {
     const { fileName, analysisContent, expectedNumbers } = prepareAnalysisInput(file, settings);
     let lastError = null;
 
@@ -115,7 +107,8 @@ const analyzeFile = async (file, settings, upstreamBaseUrl, state) => {
                 upstreamBaseUrl,
                 content: analysisContent,
                 expectedNumbers,
-                signal: abortController.signal
+                signal: abortController.signal,
+                onText
             });
             assertNotCancelled(state);
             const normalized = normalizeAndValidateAnalysisResult(rawResult, expectedNumbers);
@@ -150,6 +143,30 @@ const markCancelled = (state) => {
     state.updatedAt = now;
 };
 
+const touchAndPublish = (state) => {
+    state.updatedAt = Date.now();
+    publishBatchState(state, cloneState);
+};
+
+const appendPartialResult = (state, fileName, text) => {
+    if (!text) return;
+    const existing = state.results[fileName] || {
+        content: '',
+        isComplete: false,
+        hasError: false,
+        meta: null,
+        timestamp: Date.now()
+    };
+    state.results[fileName] = {
+        ...existing,
+        content: `${existing.content || ''}${text}`,
+        isComplete: false,
+        hasError: false,
+        timestamp: Date.now()
+    };
+    touchAndPublish(state);
+};
+
 const runBatch = async (state, files, settings, upstreamBaseUrl) => {
     try {
         for (let i = 0; i < files.length; i += 1) {
@@ -157,10 +174,16 @@ const runBatch = async (state, files, settings, upstreamBaseUrl) => {
             const file = files[i];
             const fileName = file?.name || `文件${i + 1}`;
             state.currentFile = fileName;
-            state.updatedAt = Date.now();
+            touchAndPublish(state);
 
             try {
-                const analyzed = await analyzeFile(file, settings, upstreamBaseUrl, state);
+                const analyzed = await analyzeFile(
+                    file,
+                    settings,
+                    upstreamBaseUrl,
+                    state,
+                    (text) => appendPartialResult(state, fileName, text)
+                );
                 state.results[analyzed.fileName] = {
                     content: analyzed.content,
                     isComplete: true,
@@ -171,6 +194,7 @@ const runBatch = async (state, files, settings, upstreamBaseUrl) => {
             } catch (error) {
                 if (state.cancelRequested || isCancellationError(error)) {
                     markCancelled(state);
+                    publishBatchState(state, cloneState);
                     return;
                 }
                 state.results[fileName] = {
@@ -183,14 +207,16 @@ const runBatch = async (state, files, settings, upstreamBaseUrl) => {
             }
 
             state.completedFiles = i + 1;
-            state.updatedAt = Date.now();
+            touchAndPublish(state);
             if (i < files.length - 1) await delay(INTER_FILE_DELAY_MS);
         }
         state.status = 'SUCCESS';
         state.currentFile = '';
+        publishBatchState(state, cloneState);
     } catch (error) {
         if (state.cancelRequested || isCancellationError(error)) {
             markCancelled(state);
+            publishBatchState(state, cloneState);
             return;
         }
         state.status = 'FAILED';
@@ -200,6 +226,7 @@ const runBatch = async (state, files, settings, upstreamBaseUrl) => {
             state.finishedAt = Date.now();
         }
         state.updatedAt = Date.now();
+        publishBatchState(state, cloneState);
     }
 };
 
@@ -257,7 +284,26 @@ const cancelBatch = (id) => {
     state.cancelledAt = state.cancelledAt || Date.now();
     state.updatedAt = Date.now();
     state.abortController?.abort();
+    publishBatchState(state, cloneState);
     return { statusCode: 202, payload: cloneState(state) };
+};
+
+export const isAnalysisBatchEventsPath = (pathname = '') => (
+    pathname.startsWith(`${ANALYSIS_PREFIX}/`) && pathname.endsWith('/events')
+);
+
+export const handleAnalysisBatchEventStream = ({ req, res, pathname }) => {
+    evictExpiredBatches();
+    const subPath = parseBatchSubPath(pathname);
+    const id = subPath ? decodeURIComponent(subPath.slice(0, -'/events'.length)) : '';
+    const state = getBatchState(id);
+    if (!state) {
+        res.statusCode = 404;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: { message: '分析任务不存在或已过期' } }));
+        return;
+    }
+    subscribeBatchState({ req, res, state, getSnapshot: cloneState });
 };
 
 const parseBatchSubPath = (pathname) => {

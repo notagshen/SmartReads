@@ -5,7 +5,9 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Pool } from 'pg';
 import { buildUpstreamTargetUrl, ensureSafeUpstreamBaseUrl } from './src/utils/upstreamProxyGuard.js';
 import {
+  handleAnalysisBatchEventStream,
   handleAnalysisBatchRequest,
+  isAnalysisBatchEventsPath,
   isAnalysisBatchPath
 } from './src/server/analysisBatchService.js';
 
@@ -358,6 +360,11 @@ const createProxyMiddleware = () => async (req, res, next) => {
         return;
       }
       await handleShareApiRequest(req, res, parsed);
+      return;
+    }
+
+    if (req.method === 'GET' && isAnalysisBatchEventsPath(parsed.pathname)) {
+      handleAnalysisBatchEventStream({ req, res, pathname: parsed.pathname });
       return;
     }
 

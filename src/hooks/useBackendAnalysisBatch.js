@@ -33,8 +33,13 @@ export const useBackendAnalysisBatch = () => {
     const { notifySuccess, notifyError, notifyWarning } = useOptimizedNotifications();
     const [isPolling, setIsPolling] = useState(false);
     const [hasSavedBatch, setHasSavedBatch] = useState(Boolean(readBatchRuntime()?.batchId));
-    const stopRef = useRef(false);
-    const pollingBatchRef = useRef('');
+    const eventSourceRef = useRef(null);
+    const activeBatchRef = useRef('');
+
+    const closeEventSource = useCallback(() => {
+        eventSourceRef.current?.close();
+        eventSourceRef.current = null;
+    }, []);
 
     const applyBatchState = useCallback((state) => {
         const totalFiles = Number(state.totalFiles) || 0;
@@ -64,6 +69,8 @@ export const useBackendAnalysisBatch = () => {
         writeBatchRuntime('');
         setHasSavedBatch(false);
         markResumeHandled();
+        activeBatchRef.current = '';
+        closeEventSource();
 
         if (state.status === 'SUCCESS') {
             completeAnalysis();
@@ -78,7 +85,7 @@ export const useBackendAnalysisBatch = () => {
         }
 
         notifyError('分析失败', state.errorMessage || '后端任务失败');
-    }, [completeAnalysis, markResumeHandled, notifyError, notifySuccess, notifyWarning, updateAnalysisProgress]);
+    }, [closeEventSource, completeAnalysis, markResumeHandled, notifyError, notifySuccess, notifyWarning, updateAnalysisProgress]);
 
     const fetchBatchState = useCallback(async (batchId) => {
         const response = await fetch(`/api/analysis/batches/${encodeURIComponent(batchId)}`);
@@ -87,37 +94,66 @@ export const useBackendAnalysisBatch = () => {
     }, []);
 
     const pollBatch = useCallback(async (batchId) => {
-        stopRef.current = false;
-        pollingBatchRef.current = batchId;
         setIsPolling(true);
         setHasSavedBatch(true);
+        activeBatchRef.current = batchId;
         writeBatchRuntime(batchId);
 
         try {
-            while (!stopRef.current) {
+            while (activeBatchRef.current === batchId) {
                 const state = await fetchBatchState(batchId);
                 applyBatchState(state);
-
                 if (TERMINAL_STATUSES.has(state.status)) {
                     finishTerminalState(state);
                     return state;
                 }
-
                 await delay(1500);
             }
-            notifyWarning('分析轮询已停止', '后端任务仍在运行，可刷新页面后恢复查看进度');
             return null;
         } catch (error) {
             updateAnalysisProgress({ isAnalyzing: false });
             notifyError('分析状态同步失败', error.message);
             throw error;
         } finally {
-            if (pollingBatchRef.current === batchId) {
-                pollingBatchRef.current = '';
-                setIsPolling(false);
-            }
+            setIsPolling(false);
         }
-    }, [applyBatchState, fetchBatchState, finishTerminalState, notifyError, notifyWarning, updateAnalysisProgress]);
+    }, [applyBatchState, fetchBatchState, finishTerminalState, notifyError, updateAnalysisProgress]);
+
+    const watchBatch = useCallback((batchId) => {
+        if (typeof window === 'undefined' || typeof window.EventSource !== 'function') {
+            return pollBatch(batchId);
+        }
+
+        closeEventSource();
+        setIsPolling(true);
+        setHasSavedBatch(true);
+        activeBatchRef.current = batchId;
+        writeBatchRuntime(batchId);
+
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const source = new EventSource(`/api/analysis/batches/${encodeURIComponent(batchId)}/events`);
+            eventSourceRef.current = source;
+
+            source.addEventListener('state', (event) => {
+                const state = JSON.parse(event.data);
+                applyBatchState(state);
+                if (!TERMINAL_STATUSES.has(state.status)) return;
+
+                settled = true;
+                setIsPolling(false);
+                finishTerminalState(state);
+                resolve(state);
+            });
+
+            source.onerror = () => {
+                source.close();
+                if (settled) return;
+                setIsPolling(false);
+                pollBatch(batchId).then(resolve).catch(reject);
+            };
+        });
+    }, [applyBatchState, closeEventSource, finishTerminalState, pollBatch]);
 
     const startBackendAnalysis = useCallback(async (analysisQueue = []) => {
         if (!Array.isArray(analysisQueue) || analysisQueue.length === 0) {
@@ -129,7 +165,7 @@ export const useBackendAnalysisBatch = () => {
             return;
         }
 
-        stopRef.current = true;
+        closeEventSource();
         clearAnalysisResults();
         startAnalysis(analysisQueue.length);
 
@@ -144,12 +180,12 @@ export const useBackendAnalysisBatch = () => {
             const state = await response.json();
             applyBatchState(state);
             notifySuccess('分析已提交', `已一次性提交 ${analysisQueue.length} 个文件给后端处理`);
-            await pollBatch(state.id);
+            await watchBatch(state.id);
         } catch (error) {
             updateAnalysisProgress({ isAnalyzing: false, currentFile: '', progress: 0 });
             throw error;
         }
-    }, [applyBatchState, clearAnalysisResults, notifyError, notifySuccess, notifyWarning, pollBatch, settings, startAnalysis, updateAnalysisProgress]);
+    }, [applyBatchState, clearAnalysisResults, closeEventSource, notifyError, notifySuccess, notifyWarning, settings, startAnalysis, updateAnalysisProgress, watchBatch]);
 
     const resumeBackendAnalysis = useCallback(async () => {
         const runtime = readBatchRuntime();
@@ -157,11 +193,11 @@ export const useBackendAnalysisBatch = () => {
             notifyWarning('续跑', '没有可恢复的后端分析任务');
             return;
         }
-        await pollBatch(runtime.batchId);
-    }, [notifyWarning, pollBatch]);
+        await watchBatch(runtime.batchId);
+    }, [notifyWarning, watchBatch]);
 
     const cancelBackendAnalysis = useCallback(async () => {
-        const batchId = pollingBatchRef.current || readBatchRuntime()?.batchId;
+        const batchId = activeBatchRef.current || readBatchRuntime()?.batchId;
         if (!batchId) {
             updateAnalysisProgress({ isAnalyzing: false, currentFile: '' });
             notifyWarning('取消分析', '没有找到可取消的后端任务');
@@ -177,16 +213,13 @@ export const useBackendAnalysisBatch = () => {
         applyBatchState(state);
         notifyWarning('正在取消分析', '已向后端发送取消请求，当前请求会尽快中止');
 
-        if (TERMINAL_STATUSES.has(state.status)) {
-            finishTerminalState(state);
-            return;
-        }
-        if (!isPolling) await pollBatch(batchId);
-    }, [applyBatchState, finishTerminalState, isPolling, notifyWarning, pollBatch, updateAnalysisProgress]);
+        if (TERMINAL_STATUSES.has(state.status)) finishTerminalState(state);
+    }, [applyBatchState, finishTerminalState, notifyWarning, updateAnalysisProgress]);
 
     useEffect(() => {
         setHasSavedBatch(Boolean(readBatchRuntime()?.batchId));
-    }, []);
+        return () => closeEventSource();
+    }, [closeEventSource]);
 
     return {
         isPolling,

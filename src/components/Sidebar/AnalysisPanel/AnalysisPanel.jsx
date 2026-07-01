@@ -57,6 +57,7 @@ const AnalysisPanel = () => {
     const availableCacheResults = getAllCachedSplitResults();
     const hasAvailableCache = availableCacheResults.length > 0;
     const canResumeCurrentQueue = hasSavedBatch || shouldAutoResume(shouldResumeAnalysis, analysisQueue);
+    const hasAnalysisResults = Object.keys(analysisResults).length > 0;
 
     useEffect(() => {
         if (hasAvailableCache && dataSource === 'folder') setDataSource('cache');
@@ -145,12 +146,16 @@ const AnalysisPanel = () => {
     };
 
     const handleStartAnalysis = useCallback(async () => {
+        if (hasAnalysisResults && !window.confirm('当前分析结果将被覆盖，是否继续？')) {
+            return;
+        }
+
         try {
             await startBackendAnalysis(analysisQueue);
         } catch (error) {
             notifyError('分析', error.message);
         }
-    }, [analysisQueue, startBackendAnalysis, notifyError]);
+    }, [analysisQueue, hasAnalysisResults, startBackendAnalysis, notifyError]);
 
     const handleStop = useCallback(async () => {
         if (!analysisProgress.isAnalyzing) return;
@@ -299,7 +304,7 @@ const AnalysisPanel = () => {
             </div>
             
             {/* 第二行：清空结果按钮 */}
-            {Object.keys(analysisResults).length > 0 && (
+            {hasAnalysisResults && (
                 <div className={styles.buttonGroup} style={{ marginTop: 'var(--spacing-sm)' }}>
                     <Button icon={<FaBroom />} label="清空结果" onClick={handleClearResults} variant="secondary" disabled={analysisProgress.isAnalyzing} />
                 </div>
@@ -350,7 +355,7 @@ const AnalysisPanel = () => {
                 </div>
                 {isDebugExpanded && (
                     <div className={styles.resultsText}>
-                        {Object.keys(analysisResults).length > 0 
+                        {hasAnalysisResults
                             ? getDebugText() 
                             : (
                                 <div className={styles.placeholderText}>
